@@ -1,0 +1,31 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build DA14531",
+      "type": "shell",
+      "command": "make",
+      "args": ["build"],
+      "windows": {
+        "command": "mingw32-make",
+        "args": ["build"]
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Clean DA14531",
+      "type": "shell",
+      "command": "make",
+      "args": ["clean"],
+      "windows": {
+        "command": "mingw32-make",
+        "args": ["clean"]
+      },
+      "problemMatcher": []
+    }
+  ]
+}
