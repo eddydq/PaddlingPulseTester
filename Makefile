@@ -109,6 +109,7 @@ SOURCES := \
 	firmware/app/src/paddling_pulse_board.c \
 	firmware/app/src/paddling_pulse_app.c \
 	firmware/app/src/paddling_pulse_console.c \
+	firmware/app/src/paddling_pulse_sample_store.c \
 	sdk/platform/arch/boot/system_DA14531.c \
 	sdk/platform/arch/boot/startup_DA14531.c \
 	sdk/platform/arch/main/hardfault_handler.c \
