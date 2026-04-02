@@ -39,6 +39,7 @@
  ****************************************************************************************
  */
 
+#include "da14531_config_basic.h"
 #include "arch.h"
 #include "gpio.h"
 #include "uart.h"
@@ -80,6 +81,20 @@
 
 #define SPI_DI_PORT             GPIO_PORT_0
 #define SPI_DI_PIN              GPIO_PIN_3
+
+/****************************************************************************************/
+/* I2C configuration for IMU (LIS3DH / MPU6050 only)                                   */
+/****************************************************************************************/
+#if defined(CFG_IMU_LIS3DH) || defined(CFG_IMU_MPU6050)
+
+#define PP_I2C_SCL_PORT         GPIO_PORT_0
+#define PP_I2C_SCL_PIN          GPIO_PIN_8
+#define PP_I2C_SDA_PORT         GPIO_PORT_0
+#define PP_I2C_SDA_PIN          GPIO_PIN_9
+#define PP_IMU_INT_PORT         GPIO_PORT_0
+#define PP_IMU_INT_PIN          GPIO_PIN_7
+
+#endif /* CFG_IMU_LIS3DH || CFG_IMU_MPU6050 */
 
 /***************************************************************************************/
 /* Production debug output configuration                                               */

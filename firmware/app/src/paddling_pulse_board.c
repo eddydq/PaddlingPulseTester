@@ -44,6 +44,7 @@
 #include "uart.h"
 #include "syscntl.h"
 #include "fpga_helper.h"
+#include "i2c.h"
 
 /*
  * GLOBAL VARIABLE DEFINITIONS
@@ -64,6 +65,12 @@ void GPIO_reservations(void)
 #endif
 
     RESERVE_GPIO(SPI_EN, SPI_EN_PORT, SPI_EN_PIN, PID_SPI_EN);
+
+#if defined(CFG_IMU_LIS3DH) || defined(CFG_IMU_MPU6050)
+    RESERVE_GPIO(IMU_SCL, PP_I2C_SCL_PORT, PP_I2C_SCL_PIN, PID_I2C_SCL);
+    RESERVE_GPIO(IMU_SDA, PP_I2C_SDA_PORT, PP_I2C_SDA_PIN, PID_I2C_SDA);
+    RESERVE_GPIO(IMU_INT, PP_IMU_INT_PORT, PP_IMU_INT_PIN, PID_GPIO);
+#endif
 }
 
 #endif
@@ -81,6 +88,12 @@ void set_pad_functions(void)
 #if defined (CFG_PRINTF)
     GPIO_ConfigurePin(UART1_SW_PORT, UART1_SW_PIN, INPUT, PID_UART1_RX, false);
 #endif
+
+#if defined(CFG_IMU_LIS3DH) || defined(CFG_IMU_MPU6050)
+    GPIO_ConfigurePin(PP_I2C_SCL_PORT, PP_I2C_SCL_PIN, INPUT_PULLUP, PID_I2C_SCL, false);
+    GPIO_ConfigurePin(PP_I2C_SDA_PORT, PP_I2C_SDA_PIN, INPUT_PULLUP, PID_I2C_SDA, false);
+    GPIO_ConfigurePin(PP_IMU_INT_PORT, PP_IMU_INT_PIN, INPUT, PID_GPIO, false);
+#endif
 }
 
 #if defined (CFG_PRINTF)
@@ -95,6 +108,27 @@ static const uart_cfg_t uart_cfg = {
     .tx_fifo_tr_lvl = UART1_TX_FIFO_LEVEL,
     .rx_fifo_tr_lvl = UART1_RX_FIFO_LEVEL,
     .intr_priority = 2,
+};
+#endif
+
+#if defined(CFG_IMU_LIS3DH) || defined(CFG_IMU_MPU6050)
+static const i2c_cfg_t pp_i2c_cfg = {
+    .clock_cfg = {
+        .ss_hcnt = I2C_SS_SCL_HCNT_REG_RESET,
+        .ss_lcnt = I2C_SS_SCL_LCNT_REG_RESET,
+        .fs_hcnt = I2C_FS_SCL_HCNT_REG_RESET,
+        .fs_lcnt = I2C_FS_SCL_LCNT_REG_RESET,
+    },
+    .speed     = I2C_SPEED_FAST,
+    .mode      = I2C_MODE_MASTER,
+    .addr_mode = I2C_ADDRESSING_7B,
+#if defined(CFG_IMU_LIS3DH)
+    .address   = 0x19,
+#elif defined(CFG_IMU_MPU6050)
+    .address   = 0x68,
+#endif
+    .tx_fifo_level = 16,
+    .rx_fifo_level = 16,
 };
 #endif
 
@@ -117,6 +151,10 @@ void periph_init(void)
 
     // Set pad functionality
     set_pad_functions();
+
+#if defined(CFG_IMU_LIS3DH) || defined(CFG_IMU_MPU6050)
+    i2c_init(&pp_i2c_cfg);
+#endif
 
 #if defined (CFG_PRINTF)
     uart_one_wire_enable(UART1, UART1_SW_PORT, UART1_SW_PIN);
