@@ -49,6 +49,10 @@
 #include "app_easy_timer.h"
 #include "paddling_pulse_app.h"
 #include "paddling_pulse_console.h"
+#include "paddling_pulse_imu.h"
+#include "paddling_pulse_sample_store.h"
+#include "paddling_pulse_stroke_rate.h"
+#include "arch_console.h"
 #include "co_bt.h"
 #include "app_cscps.h"
 
@@ -75,6 +79,9 @@ struct mnf_specific_data_ad_structure
 uint8_t app_connection_idx                      __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
 timer_hnd app_adv_data_update_timer_used        __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
 timer_hnd app_param_update_request_timer_used   __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
+timer_hnd app_csc_meas_timer_used               __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
+timer_hnd app_imu_process_timer_used            __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
+timer_hnd app_stroke_rate_timer_used            __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
 
 // Retained variables
 struct mnf_specific_data_ad_structure mnf_data  __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
@@ -84,6 +91,10 @@ uint8_t stored_adv_data_len                     __SECTION_ZERO("retention_mem_ar
 uint8_t stored_scan_rsp_data_len                __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
 uint8_t stored_adv_data[ADV_DATA_LEN]           __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
 uint8_t stored_scan_rsp_data[SCAN_RSP_DATA_LEN] __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
+bool csc_meas_ntf_enabled                       __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
+bool imu_active                                 __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
+uint8_t current_cadence_rpm                     __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
+struct cscp_csc_meas csc_meas_state             __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
 
 /*
  * FUNCTION DEFINITIONS
@@ -216,9 +227,124 @@ static void param_update_request_timer_cb()
     app_param_update_request_timer_used = EASY_TIMER_INVALID_TIMER;
 }
 
+static void imu_process_timer_cb(void)
+{
+    app_imu_process_timer_used = EASY_TIMER_INVALID_TIMER;
+    if (!csc_meas_ntf_enabled) return;
+
+    pp_imu_process();
+    app_imu_process_timer_used = app_easy_timer(APP_IMU_PROCESS_TO, imu_process_timer_cb);
+}
+
+static void stroke_rate_timer_cb(void)
+{
+    app_stroke_rate_timer_used = EASY_TIMER_INVALID_TIMER;
+    if (!csc_meas_ntf_enabled) return;
+
+    pp_stroke_rate_update();
+
+#ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
+    arch_printf("SR: rpm=%u samples=%u\r\n",
+                pp_stroke_rate_get_rpm(),
+                pp_sample_store_get_count());
+#endif
+
+    app_stroke_rate_timer_used = app_easy_timer(APP_STROKE_RATE_TO, stroke_rate_timer_cb);
+}
+
+static void csc_meas_timer_cb(void)
+{
+    app_csc_meas_timer_used = EASY_TIMER_INVALID_TIMER;
+    if (!csc_meas_ntf_enabled) return;
+
+    if (app_connection_idx != GAP_INVALID_CONIDX)
+    {
+        uint8_t rpm = pp_stroke_rate_get_rpm();
+        uint8_t cadence = (rpm > 0) ? rpm : current_cadence_rpm;
+
+        uint16_t drev, dticks;
+        pp_cadence_to_crank(cadence, &drev, &dticks);
+
+        csc_meas_state.flags              = CSCP_MEAS_CRANK_REV_DATA_PRESENT;
+        csc_meas_state.cumul_crank_rev   += drev;
+        csc_meas_state.last_crank_evt_time += dticks;
+        csc_meas_state.cumul_wheel_rev    = 0;
+        csc_meas_state.last_wheel_evt_time = 0;
+
+        app_cscps_ntf_csc_meas_req(app_connection_idx, &csc_meas_state);
+
+#ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
+        arch_printf("CSC: rpm=%u rev=%u time=%u\r\n",
+                    cadence, drev, dticks);
+#endif
+    }
+
+    app_csc_meas_timer_used = app_easy_timer(APP_CSC_MEAS_NTF_TO, csc_meas_timer_cb);
+}
+
+static void pipeline_start(void)
+{
+#ifdef CFG_IMU_POLAR
+    pp_sample_store_init(52);
+#else
+    pp_sample_store_init(100);
+#endif
+    pp_stroke_rate_init();
+
+    imu_active = pp_imu_init();
+    if (imu_active)
+    {
+        pp_imu_start();
+    }
+#ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
+    else
+    {
+        arch_printf("IMU: init failed, using manual cadence\r\n");
+    }
+#endif
+
+    app_imu_process_timer_used   = app_easy_timer(APP_IMU_PROCESS_TO, imu_process_timer_cb);
+    app_stroke_rate_timer_used   = app_easy_timer(APP_STROKE_RATE_TO, stroke_rate_timer_cb);
+    app_csc_meas_timer_used      = app_easy_timer(APP_CSC_MEAS_NTF_TO, csc_meas_timer_cb);
+}
+
+static void pipeline_stop(void)
+{
+    if (app_imu_process_timer_used != EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(app_imu_process_timer_used);
+        app_imu_process_timer_used = EASY_TIMER_INVALID_TIMER;
+    }
+    if (app_stroke_rate_timer_used != EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(app_stroke_rate_timer_used);
+        app_stroke_rate_timer_used = EASY_TIMER_INVALID_TIMER;
+    }
+    if (app_csc_meas_timer_used != EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(app_csc_meas_timer_used);
+        app_csc_meas_timer_used = EASY_TIMER_INVALID_TIMER;
+    }
+
+    if (imu_active)
+    {
+        pp_imu_stop();
+        imu_active = false;
+    }
+    pp_sample_store_reset();
+}
+
 void user_app_init(void)
 {
+    app_connection_idx = GAP_INVALID_CONIDX;
+    app_csc_meas_timer_used = EASY_TIMER_INVALID_TIMER;
     app_param_update_request_timer_used = EASY_TIMER_INVALID_TIMER;
+    app_imu_process_timer_used = EASY_TIMER_INVALID_TIMER;
+    app_stroke_rate_timer_used = EASY_TIMER_INVALID_TIMER;
+    csc_meas_ntf_enabled = false;
+    imu_active = false;
+    current_cadence_rpm = APP_CSCP_DEFAULT_CADENCE_RPM;
+    memset(&csc_meas_state, 0, sizeof(csc_meas_state));
     
     // Initialize Manufacturer Specific Data
     mnf_data_init();
@@ -231,6 +357,11 @@ void user_app_init(void)
     
     default_app_on_init();
     paddling_pulse_console_init();
+}
+
+void user_app_on_get_dev_appearance(uint16_t *appearance)
+{
+    *appearance = APP_CSCP_DEVICE_APPEARANCE;
 }
 
 void user_app_adv_start(void)
@@ -247,11 +378,19 @@ void user_app_adv_start(void)
     app_easy_gap_undirected_advertise_start();
 }
 
-void user_app_connection(uint8_t connection_idx, struct gapc_connection_req_ind const *param)
+void user_app_connection(const uint8_t conidx, struct gapc_connection_req_ind const *param)
 {
-    if (app_env[connection_idx].conidx != GAP_INVALID_CONIDX)
+#ifdef CFG_IMU_POLAR
+    /* Check if this is the Polar central-role connection */
+    if (pp_imu_polar_on_connection(conidx, param))
     {
-        app_connection_idx = connection_idx;
+        return;
+    }
+#endif
+
+    if (app_env[conidx].conidx != GAP_INVALID_CONIDX)
+    {
+        app_connection_idx = conidx;
 
         // Stop the advertising data update timer
         app_easy_timer_cancel(app_adv_data_update_timer_used);
@@ -273,7 +412,7 @@ void user_app_connection(uint8_t connection_idx, struct gapc_connection_req_ind 
         user_app_adv_start();
     }
 
-    default_app_on_connection(connection_idx, param);
+    default_app_on_connection(conidx, param);
 }
 
 void user_app_adv_undirect_complete(uint8_t status)
@@ -287,15 +426,26 @@ void user_app_adv_undirect_complete(uint8_t status)
 
 void user_app_disconnect(struct gapc_disconnect_ind const *param)
 {
-    // Cancel the parameter update request timer
+#ifdef CFG_IMU_POLAR
+    if (pp_imu_polar_on_disconnect(param->conhdl))
+    {
+        /* Polar connection dropped — driver handles retry internally */
+        return;
+    }
+#endif
+
+    app_connection_idx = GAP_INVALID_CONIDX;
+    csc_meas_ntf_enabled = false;
+
+    pipeline_stop();
+
     if (app_param_update_request_timer_used != EASY_TIMER_INVALID_TIMER)
     {
         app_easy_timer_cancel(app_param_update_request_timer_used);
         app_param_update_request_timer_used = EASY_TIMER_INVALID_TIMER;
     }
-    // Update manufacturer data for the next advertsing event
+
     mnf_data_update();
-    // Restart Advertising
     user_app_adv_start();
 }
 
@@ -309,20 +459,18 @@ void user_catch_rest_hndl(ke_msg_id_t const msgid,
         return;
     }
 
+#ifdef CFG_IMU_POLAR
+    if (pp_imu_polar_handle_message(msgid, param, dest_id, src_id))
+    {
+        return;
+    }
+#endif
+
     switch(msgid)
     {
         case GAPC_PARAM_UPDATED_IND:
         {
-            // Cast the "param" pointer to the appropriate message structure
-            struct gapc_param_updated_ind const *msg_param = (struct gapc_param_updated_ind const *)(param);
-
-            // Check if updated Conn Params filled to preferred ones
-            if ((msg_param->con_interval >= user_connection_param_conf.intv_min) &&
-                (msg_param->con_interval <= user_connection_param_conf.intv_max) &&
-                (msg_param->con_latency == user_connection_param_conf.latency) &&
-                (msg_param->sup_to == user_connection_param_conf.time_out))
-            {
-            }
+            (void)param;
         } break;
 
         case GATTC_EVENT_REQ_IND:
@@ -340,7 +488,20 @@ void user_catch_rest_hndl(ke_msg_id_t const msgid,
 }
 void user_on_cscps_cfg_ntfind_ind(uint8_t conidx, const struct cscps_cfg_ntfind_ind *param)
 {
-    // Defer to the SDK handler so notifications/indications get applied
+    if (param->char_code == CSCP_CSCS_CSC_MEAS_CHAR)
+    {
+        if (param->ntf_cfg == PRF_CLI_START_NTF)
+        {
+            csc_meas_ntf_enabled = true;
+            pipeline_start();
+        }
+        else
+        {
+            csc_meas_ntf_enabled = false;
+            pipeline_stop();
+        }
+    }
+
     app_cscps_cfg_ntfind_ind(conidx, param);
 }
 
