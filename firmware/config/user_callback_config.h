@@ -48,6 +48,10 @@
 #include "app_bond_db.h"
 #endif // (BLE_APP_SEC)
 #include "paddling_pulse_app.h"
+#include "da14531_config_basic.h"
+#ifdef CFG_IMU_POLAR
+#include "paddling_pulse_imu_polar.h"
+#endif
 #include "app_cscps.h"
 
 /*
@@ -68,10 +72,15 @@ static const struct app_callbacks user_app_callbacks = {
     .app_on_adv_undirect_complete       = user_app_adv_undirect_complete,
     .app_on_adv_direct_complete         = NULL,
     .app_on_db_init_complete            = default_app_on_db_init_complete,
+#ifdef CFG_IMU_POLAR
+    .app_on_scanning_completed          = pp_imu_polar_on_scan_complete,
+    .app_on_adv_report_ind              = pp_imu_polar_on_adv_report,
+#else
     .app_on_scanning_completed          = NULL,
     .app_on_adv_report_ind              = NULL,
+#endif
     .app_on_get_dev_name                = default_app_on_get_dev_name,
-    .app_on_get_dev_appearance          = default_app_on_get_dev_appearance,
+    .app_on_get_dev_appearance          = user_app_on_get_dev_appearance,
     .app_on_get_dev_slv_pref_params     = default_app_on_get_dev_slv_pref_params,
     .app_on_set_dev_info                = default_app_on_set_dev_info,
     .app_on_data_length_change          = NULL,
