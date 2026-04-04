@@ -49,10 +49,10 @@
 #include "app_easy_timer.h"
 #include "paddling_pulse_app.h"
 #include "paddling_pulse_console.h"
+#include "paddling_pulse_console_io.h"
 #include "paddling_pulse_imu.h"
 #include "paddling_pulse_sample_store.h"
 #include "paddling_pulse_stroke_rate.h"
-#include "arch_console.h"
 #include "co_bt.h"
 #include "app_cscps.h"
 
@@ -100,6 +100,25 @@ struct cscp_csc_meas csc_meas_state             __SECTION_ZERO("retention_mem_ar
  * FUNCTION DEFINITIONS
  ****************************************************************************************
 */
+
+#ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
+static void ble_log_peer(const char *message, uint8_t conidx, uint16_t conhdl,
+                         uint8_t addr_type, const struct bd_addr *addr)
+{
+    paddling_pulse_console_printf("BLE: %s idx=%u h=%u type=%u addr=%02X:%02X:%02X:%02X:%02X:%02X\r\n",
+                                  message,
+                                  conidx,
+                                  conhdl,
+                                  addr_type,
+                                  addr->addr[5], addr->addr[4], addr->addr[3],
+                                  addr->addr[2], addr->addr[1], addr->addr[0]);
+}
+
+static void ble_log_cfg(const char *message, uint8_t conidx)
+{
+    paddling_pulse_console_printf("BLE: %s idx=%u\r\n", message, conidx);
+}
+#endif
 
 
 
@@ -244,9 +263,9 @@ static void stroke_rate_timer_cb(void)
     pp_stroke_rate_update();
 
 #ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
-    arch_printf("SR: rpm=%u samples=%u\r\n",
-                pp_stroke_rate_get_rpm(),
-                pp_sample_store_get_count());
+    paddling_pulse_console_printf("SR: rpm=%u samples=%u\r\n",
+                                  pp_stroke_rate_get_rpm(),
+                                  pp_sample_store_get_count());
 #endif
 
     app_stroke_rate_timer_used = app_easy_timer(APP_STROKE_RATE_TO, stroke_rate_timer_cb);
@@ -274,8 +293,8 @@ static void csc_meas_timer_cb(void)
         app_cscps_ntf_csc_meas_req(app_connection_idx, &csc_meas_state);
 
 #ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
-        arch_printf("CSC: rpm=%u rev=%u time=%u\r\n",
-                    cadence, drev, dticks);
+        paddling_pulse_console_printf("CSC: rpm=%u rev=%u time=%u\r\n",
+                                      cadence, drev, dticks);
 #endif
     }
 
@@ -299,7 +318,7 @@ static void pipeline_start(void)
 #ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
     else
     {
-        arch_printf("IMU: init failed, using manual cadence\r\n");
+        paddling_pulse_console_printf("IMU: init failed, using manual cadence\r\n");
     }
 #endif
 
@@ -392,6 +411,11 @@ void user_app_connection(const uint8_t conidx, struct gapc_connection_req_ind co
     {
         app_connection_idx = conidx;
 
+#ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
+        ble_log_peer("connected", conidx, param->conhdl,
+                     param->peer_addr_type, &param->peer_addr);
+#endif
+
         // Stop the advertising data update timer
         app_easy_timer_cancel(app_adv_data_update_timer_used);
 
@@ -435,6 +459,11 @@ void user_app_disconnect(struct gapc_disconnect_ind const *param)
 #endif
 
     app_connection_idx = GAP_INVALID_CONIDX;
+
+#ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
+    paddling_pulse_console_printf("BLE: disconnect h=%u\r\n", param->conhdl);
+#endif
+
     csc_meas_ntf_enabled = false;
 
     pipeline_stop();
@@ -492,11 +521,17 @@ void user_on_cscps_cfg_ntfind_ind(uint8_t conidx, const struct cscps_cfg_ntfind_
     {
         if (param->ntf_cfg == PRF_CLI_START_NTF)
         {
+#ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
+            ble_log_cfg("csc ntf on", conidx);
+#endif
             csc_meas_ntf_enabled = true;
             pipeline_start();
         }
         else
         {
+#ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
+            ble_log_cfg("csc ntf off", conidx);
+#endif
             csc_meas_ntf_enabled = false;
             pipeline_stop();
         }

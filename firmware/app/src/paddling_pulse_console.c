@@ -15,6 +15,7 @@
 #include "ke_msg.h"
 #include "paddling_pulse_board.h"
 #include "paddling_pulse_console.h"
+#include "paddling_pulse_console_io.h"
 #include "paddling_pulse_imu.h"
 #include "paddling_pulse_sample_store.h"
 #include "paddling_pulse_stroke_rate.h"
@@ -51,14 +52,7 @@ static void paddling_pulse_console_arm_rx(void)
 
 static void paddling_pulse_console_send_reply(const char *reply)
 {
-#if defined(CFG_UART_ONE_WIRE_SUPPORT)
-    uart_one_wire_tx_en(UART1);
-#endif
-    uart_send(UART1, (const uint8_t *)reply, (uint16_t)strlen(reply), UART_OP_BLOCKING);
-    uart_wait_tx_finish(UART1);
-#if defined(CFG_UART_ONE_WIRE_SUPPORT)
-    uart_one_wire_rx_en(UART1);
-#endif
+    paddling_pulse_console_write(reply);
 }
 
 static void paddling_pulse_console_reset_input(void)

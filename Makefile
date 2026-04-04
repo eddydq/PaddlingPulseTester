@@ -109,6 +109,7 @@ SOURCES := \
 	firmware/app/src/paddling_pulse_board.c \
 	firmware/app/src/paddling_pulse_app.c \
 	firmware/app/src/paddling_pulse_console.c \
+	firmware/app/src/paddling_pulse_console_io.c \
 	firmware/app/src/paddling_pulse_sample_store.c \
 	firmware/app/src/paddling_pulse_stroke_rate.c \
 	firmware/app/src/paddling_pulse_imu_lis3dh.c \
