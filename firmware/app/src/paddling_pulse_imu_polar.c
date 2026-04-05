@@ -1124,11 +1124,35 @@ bool pp_imu_polar_handle_message(ke_msg_id_t msgid,
     case GAPM_CMP_EVT:
     {
         const struct gapm_cmp_evt *evt = (const struct gapm_cmp_evt *)param;
+
+        if (evt->operation == GAPM_CANCEL)
+        {
+            if (s_stop_cancel_pending)
+            {
+                s_stop_cancel_pending = false;
+                /* Stop was requested. polar_reset() was NOT called in
+                   pp_imu_polar_stop() to keep state alive for this handler.
+                   Call it now. */
+                polar_reset();
+                return true;
+            }
+            if (s_timeout_cancel_pending)
+            {
+                s_timeout_cancel_pending = false;
+                polar_retry_if_needed();
+                return true;
+            }
+            /* Scan-cancel-before-connect: no flag set, fall through.
+               The scan completion callback handles this path by scheduling
+               the deferred connect via pp_imu_polar_on_scan_complete(). */
+        }
+
         if (evt->operation == GAPM_CONNECTION_DIRECT &&
             evt->status != GAP_ERR_NO_ERROR &&
             s_polar.state == POLAR_CONNECTING)
         {
             polar_log_status("connect fail", evt->status);
+            ke_state_set(TASK_APP, APP_CONNECTED);
             polar_retry_if_needed();
             return true;
         }
