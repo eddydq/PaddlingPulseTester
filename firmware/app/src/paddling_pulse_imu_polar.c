@@ -45,7 +45,7 @@ static const uint8_t polar_pmd_data_uuid[ATT_UUID_128_LEN] = {
     0x1C, 0xAD, 0x8A, 0xCD, 0x2D, 0x8D, 0xF0, 0xC8
 };
 
-#define POLAR_SCAN_INTV             10
+#define POLAR_CONNECT_INTV          10      /* 12.5 ms connection interval */
 #define POLAR_CONNECT_TIMEOUT       800     /* 8 s in 10ms ticks */
 #define POLAR_PMD_DATA_HDR_LEN      10
 #define POLAR_CP_RSP_MAX_LEN        96
@@ -385,6 +385,9 @@ static void polar_connect_timeout_cb(void)
     if (s_polar.state == POLAR_CONNECTING)
     {
         polar_log("connect timeout");
+        ke_state_set(TASK_APP, APP_CONNECTED);
+
+        s_timeout_cancel_pending = true;
         struct gapm_cancel_cmd *cmd = KE_MSG_ALLOC(
             GAPM_CANCEL_CMD, TASK_GAPM, TASK_APP, gapm_cancel_cmd);
         cmd->operation = GAPM_CANCEL;
@@ -403,10 +406,10 @@ static void polar_start_connection(void)
         gapm_start_connection_cmd, sizeof(struct gap_bdaddr));
     cmd->op.code     = GAPM_CONNECTION_DIRECT;
     cmd->op.addr_src = APP_CFG_ADDR_SRC(USER_CFG_ADDRESS_MODE);
-    cmd->scan_interval = POLAR_SCAN_INTV;
-    cmd->scan_window   = POLAR_SCAN_INTV;
-    cmd->con_intv_min  = user_central_conf.con_intv_min;
-    cmd->con_intv_max  = user_central_conf.con_intv_max;
+    cmd->scan_interval = user_central_conf.scan_interval;
+    cmd->scan_window   = user_central_conf.scan_window;
+    cmd->con_intv_min  = POLAR_CONNECT_INTV;
+    cmd->con_intv_max  = POLAR_CONNECT_INTV;
     cmd->con_latency   = user_central_conf.con_latency;
     cmd->superv_to     = user_central_conf.superv_to;
     cmd->ce_len_min    = user_central_conf.ce_len_min;
@@ -415,6 +418,7 @@ static void polar_start_connection(void)
     memcpy(&cmd->peers[0].addr, &s_polar.target_addr, BD_ADDR_LEN);
     cmd->peers[0].addr_type = s_polar.target_addr_type;
     KE_MSG_SEND(cmd);
+    ke_state_set(TASK_APP, APP_CONNECTABLE);
 
     s_connect_timer = app_easy_timer(POLAR_CONNECT_TIMEOUT, polar_connect_timeout_cb);
 }
