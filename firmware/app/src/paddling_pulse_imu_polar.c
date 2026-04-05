@@ -21,6 +21,7 @@
 #include "ke_task.h"
 #include "app_easy_timer.h"
 #include "app.h"
+#include "app_task.h"
 #include "arch.h"
 #include "paddling_pulse_console_io.h"
 #include "user_config.h"
@@ -113,6 +114,8 @@ static struct {
 } s_polar __SECTION_ZERO("retention_mem_area0");
 
 static timer_hnd s_connect_timer __SECTION_ZERO("retention_mem_area0");
+static bool s_timeout_cancel_pending __SECTION_ZERO("retention_mem_area0");
+static bool s_stop_cancel_pending    __SECTION_ZERO("retention_mem_area0");
 
 static const char *polar_state_name(uint8_t state)
 {
@@ -881,6 +884,9 @@ static void polar_reset(void)
     }
     memset(&s_polar, 0, sizeof(s_polar));
     s_polar.conidx = GAP_INVALID_CONIDX;
+    s_polar.conhdl = GAP_INVALID_CONHDL;
+    s_timeout_cancel_pending = false;
+    s_stop_cancel_pending    = false;
 }
 
 static void polar_retry_if_needed(void)
@@ -917,9 +923,23 @@ void pp_imu_polar_start(void)
 
 void pp_imu_polar_stop(void)
 {
-    if (s_polar.state == POLAR_STREAMING && s_polar.conidx != GAP_INVALID_CONIDX)
+    if (s_polar.state == POLAR_SCANNING || s_polar.state == POLAR_CONNECTING)
     {
-        /* Disconnect from Polar sensor */
+        polar_log("stop cancel");
+        if (s_polar.state == POLAR_CONNECTING)
+        {
+            ke_state_set(TASK_APP, APP_CONNECTED);
+        }
+        s_stop_cancel_pending = true;
+        struct gapm_cancel_cmd *cmd = KE_MSG_ALLOC(
+            GAPM_CANCEL_CMD, TASK_GAPM, TASK_APP, gapm_cancel_cmd);
+        cmd->operation = GAPM_CANCEL;
+        KE_MSG_SEND(cmd);
+        /* polar_reset() deferred to GAPM_CANCEL completion handler (Task 3)
+           to avoid resetting state before the cancel event arrives. */
+    }
+    else if (s_polar.state >= POLAR_WAIT_MTU && s_polar.conidx != GAP_INVALID_CONIDX)
+    {
         polar_log("stop disconnect");
         struct gapc_disconnect_cmd *cmd = KE_MSG_ALLOC(
             GAPC_DISCONNECT_CMD,
@@ -928,8 +948,12 @@ void pp_imu_polar_stop(void)
         cmd->operation = GAPC_DISCONNECT;
         cmd->reason    = CO_ERROR_REMOTE_USER_TERM_CON;
         KE_MSG_SEND(cmd);
+        polar_reset();
     }
-    polar_reset();
+    else
+    {
+        polar_reset();
+    }
 }
 
 bool pp_imu_polar_is_running(void)
@@ -1014,10 +1038,14 @@ bool pp_imu_polar_on_connection(uint8_t conidx,
 
 bool pp_imu_polar_on_disconnect(uint16_t conhdl)
 {
+    if (s_polar.conhdl == GAP_INVALID_CONHDL)
+        return false;
     if (s_polar.conhdl != conhdl || s_polar.state == POLAR_IDLE)
         return false;
 
+#ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
     paddling_pulse_console_printf("POLAR: disconnect h=%u\r\n", conhdl);
+#endif
     polar_retry_if_needed();
     return true;
 }

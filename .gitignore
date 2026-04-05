@@ -1,3 +1,5 @@
 build/
 config/local.mk
 config/local/
+.claude/
+tests/
