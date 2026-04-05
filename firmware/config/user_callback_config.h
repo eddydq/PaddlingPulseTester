@@ -75,9 +75,11 @@ static const struct app_callbacks user_app_callbacks = {
 #ifdef CFG_IMU_POLAR
     .app_on_scanning_completed          = pp_imu_polar_on_scan_complete,
     .app_on_adv_report_ind              = pp_imu_polar_on_adv_report,
+    .app_on_connect_failed              = pp_imu_polar_on_connect_failed,
 #else
     .app_on_scanning_completed          = NULL,
     .app_on_adv_report_ind              = NULL,
+    .app_on_connect_failed              = NULL,
 #endif
     .app_on_get_dev_name                = default_app_on_get_dev_name,
     .app_on_get_dev_appearance          = user_app_on_get_dev_appearance,

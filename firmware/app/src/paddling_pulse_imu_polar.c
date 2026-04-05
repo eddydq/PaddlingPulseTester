@@ -20,6 +20,7 @@
 #include "ke_msg.h"
 #include "ke_task.h"
 #include "app_easy_timer.h"
+#include "app_easy_gap.h"
 #include "app.h"
 #include "app_task.h"
 #include "arch.h"
@@ -33,16 +34,16 @@
 
 /* PMD service and characteristic UUIDs (128-bit, little-endian) */
 static const uint8_t polar_pmd_svc_uuid[ATT_UUID_128_LEN] = {
-    0xFB, 0x00, 0x5C, 0x80, 0x02, 0xE7, 0xF3, 0x87,
-    0x1C, 0xAD, 0x8A, 0xCD, 0x2D, 0x8D, 0xF0, 0xC8
+    0xC8, 0xF0, 0x8D, 0x2D, 0xCD, 0x8A, 0xAD, 0x1C,
+    0x87, 0xF3, 0xE7, 0x02, 0x80, 0x5C, 0x00, 0xFB
 };
 static const uint8_t polar_pmd_cp_uuid[ATT_UUID_128_LEN] = {
-    0xFB, 0x00, 0x5C, 0x81, 0x02, 0xE7, 0xF3, 0x87,
-    0x1C, 0xAD, 0x8A, 0xCD, 0x2D, 0x8D, 0xF0, 0xC8
+    0xC8, 0xF0, 0x8D, 0x2D, 0xCD, 0x8A, 0xAD, 0x1C,
+    0x87, 0xF3, 0xE7, 0x02, 0x81, 0x5C, 0x00, 0xFB
 };
 static const uint8_t polar_pmd_data_uuid[ATT_UUID_128_LEN] = {
-    0xFB, 0x00, 0x5C, 0x82, 0x02, 0xE7, 0xF3, 0x87,
-    0x1C, 0xAD, 0x8A, 0xCD, 0x2D, 0x8D, 0xF0, 0xC8
+    0xC8, 0xF0, 0x8D, 0x2D, 0xCD, 0x8A, 0xAD, 0x1C,
+    0x87, 0xF3, 0xE7, 0x02, 0x82, 0x5C, 0x00, 0xFB
 };
 
 #define POLAR_CONNECT_INTV          10      /* 12.5 ms connection interval */
@@ -50,6 +51,7 @@ static const uint8_t polar_pmd_data_uuid[ATT_UUID_128_LEN] = {
 #define POLAR_PMD_DATA_HDR_LEN      10
 #define POLAR_CP_RSP_MAX_LEN        96
 #define POLAR_ACC_TLV_MAX_LEN       24
+#define POLAR_MAX_SETTING_VALUES    8
 
 #define POLAR_PMD_OP_GET_SETTINGS   0x01
 #define POLAR_PMD_OP_START_MEAS     0x02
@@ -68,7 +70,14 @@ enum polar_setting_type {
     POLAR_SET_SAMPLE_RATE   = 0x00,
     POLAR_SET_RESOLUTION    = 0x01,
     POLAR_SET_RANGE         = 0x02,
+    POLAR_SET_RANGE_MILLIUNIT = 0x03,
     POLAR_SET_CHANNELS      = 0x04,
+};
+
+struct polar_setting_list
+{
+    uint8_t count;
+    int32_t values[POLAR_MAX_SETTING_VALUES];
 };
 
 /*
@@ -111,10 +120,10 @@ static struct {
     uint16_t acc_sample_rate_hz;
     uint8_t  acc_selected_tlvs[POLAR_ACC_TLV_MAX_LEN];
     uint8_t  acc_selected_tlvs_len;
+    uint8_t  acc_selected_tlv_count;
 } s_polar __SECTION_ZERO("retention_mem_area0");
 
 static timer_hnd s_connect_timer __SECTION_ZERO("retention_mem_area0");
-static bool s_timeout_cancel_pending __SECTION_ZERO("retention_mem_area0");
 static bool s_stop_cancel_pending    __SECTION_ZERO("retention_mem_area0");
 
 static const char *polar_state_name(uint8_t state)
@@ -187,6 +196,24 @@ static void polar_log_acc_cfg(uint16_t sample_rate_hz, uint8_t tlv_count)
 {
     paddling_pulse_console_printf("POLAR: acc cfg rate=%uHz tlvs=%u\r\n", sample_rate_hz, tlv_count);
 }
+
+static void polar_log_app_states(const char *tag)
+{
+#if APP_IDX_MAX > 1
+    paddling_pulse_console_printf(
+        "POLAR: %s app_state[0]=%u app_state[1]=%u polar_state=%u\r\n",
+        tag,
+        ke_state_get(KE_BUILD_ID(TASK_APP, 0)),
+        ke_state_get(KE_BUILD_ID(TASK_APP, 1)),
+        s_polar.state);
+#else
+    paddling_pulse_console_printf(
+        "POLAR: %s app_state=%u polar_state=%u\r\n",
+        tag,
+        ke_state_get(TASK_APP),
+        s_polar.state);
+#endif
+}
 #else
 static void polar_log(const char *message) { (void)message; }
 static void polar_log_status(const char *message, uint16_t status)
@@ -230,6 +257,10 @@ static void polar_log_acc_cfg(uint16_t sample_rate_hz, uint8_t tlv_count)
     (void)sample_rate_hz;
     (void)tlv_count;
 }
+static void polar_log_app_states(const char *tag)
+{
+    (void)tag;
+}
 #endif
 
 /*
@@ -238,6 +269,7 @@ static void polar_log_acc_cfg(uint16_t sample_rate_hz, uint8_t tlv_count)
 static void polar_clear_handles(void);
 static void polar_reset(void);
 static void polar_retry_if_needed(void);
+static int32_t polar_parse_signed_le(const uint8_t *data, uint8_t size);
 
 /*
  * GATT HELPERS
@@ -259,11 +291,12 @@ static void polar_gatt_discover_chars(uint8_t conidx)
 {
     struct gattc_disc_cmd *cmd = KE_MSG_ALLOC_DYN(
         GATTC_DISC_CMD, KE_BUILD_ID(TASK_GATTC, conidx), TASK_APP,
-        gattc_disc_cmd, 0);
+        gattc_disc_cmd, ATT_UUID_16_LEN);
     cmd->operation  = GATTC_DISC_ALL_CHAR;
     cmd->start_hdl  = s_polar.svc_start;
     cmd->end_hdl    = s_polar.svc_end;
-    cmd->uuid_len   = 0;
+    cmd->uuid_len   = ATT_UUID_16_LEN;
+    co_write16p(&(cmd->uuid[0]), ATT_INVALID_UUID);
     KE_MSG_SEND(cmd);
 }
 
@@ -273,11 +306,12 @@ static void polar_gatt_discover_desc(uint8_t conidx,
     if (start_hdl > end_hdl) return;
     struct gattc_disc_cmd *cmd = KE_MSG_ALLOC_DYN(
         GATTC_DISC_CMD, KE_BUILD_ID(TASK_GATTC, conidx), TASK_APP,
-        gattc_disc_cmd, 0);
+        gattc_disc_cmd, ATT_UUID_16_LEN);
     cmd->operation  = GATTC_DISC_DESC_CHAR;
     cmd->start_hdl  = start_hdl;
     cmd->end_hdl    = end_hdl;
-    cmd->uuid_len   = 0;
+    cmd->uuid_len   = ATT_UUID_16_LEN;
+    co_write16p(&(cmd->uuid[0]), ATT_INVALID_UUID);
     KE_MSG_SEND(cmd);
 }
 
@@ -385,9 +419,6 @@ static void polar_connect_timeout_cb(void)
     if (s_polar.state == POLAR_CONNECTING)
     {
         polar_log("connect timeout");
-        ke_state_set(TASK_APP, APP_CONNECTED);
-
-        s_timeout_cancel_pending = true;
         struct gapm_cancel_cmd *cmd = KE_MSG_ALLOC(
             GAPM_CANCEL_CMD, TASK_GAPM, TASK_APP, gapm_cancel_cmd);
         cmd->operation = GAPM_CANCEL;
@@ -400,24 +431,14 @@ static void polar_start_connection(void)
     if (s_polar.state != POLAR_CONNECTING) return;
 
     polar_log_addr("connect start", s_polar.target_addr_type, &s_polar.target_addr);
+    polar_log_app_states("before connect");
 
-    struct gapm_start_connection_cmd *cmd = KE_MSG_ALLOC_DYN(
-        GAPM_START_CONNECTION_CMD, TASK_GAPM, TASK_APP,
-        gapm_start_connection_cmd, sizeof(struct gap_bdaddr));
-    cmd->op.code     = GAPM_CONNECTION_DIRECT;
-    cmd->op.addr_src = APP_CFG_ADDR_SRC(USER_CFG_ADDRESS_MODE);
-    cmd->scan_interval = user_central_conf.scan_interval;
-    cmd->scan_window   = user_central_conf.scan_window;
-    cmd->con_intv_min  = POLAR_CONNECT_INTV;
-    cmd->con_intv_max  = POLAR_CONNECT_INTV;
-    cmd->con_latency   = user_central_conf.con_latency;
-    cmd->superv_to     = user_central_conf.superv_to;
-    cmd->ce_len_min    = user_central_conf.ce_len_min;
-    cmd->ce_len_max    = user_central_conf.ce_len_max;
-    cmd->nb_peers      = 1;
-    memcpy(&cmd->peers[0].addr, &s_polar.target_addr, BD_ADDR_LEN);
-    cmd->peers[0].addr_type = s_polar.target_addr_type;
-    KE_MSG_SEND(cmd);
+    app_easy_gap_start_connection_to_set(
+        s_polar.target_addr_type,
+        (uint8_t *)&s_polar.target_addr,
+        POLAR_CONNECT_INTV);
+    app_easy_gap_start_connection_to();
+    polar_log_app_states("after connect start");
     ke_state_set(TASK_APP, APP_CONNECTABLE);
 
     s_connect_timer = app_easy_timer(POLAR_CONNECT_TIMEOUT, polar_connect_timeout_cb);
@@ -432,66 +453,157 @@ static void polar_deferred_connect_cb(void)
 /*
  * SETTINGS PARSING
  */
+static uint8_t polar_setting_field_size(uint8_t setting_type)
+{
+    switch (setting_type)
+    {
+    case POLAR_SET_SAMPLE_RATE:
+    case POLAR_SET_RESOLUTION:
+    case POLAR_SET_RANGE:
+        return 2;
+
+    case POLAR_SET_RANGE_MILLIUNIT:
+        return 4;
+
+    case POLAR_SET_CHANNELS:
+        return 1;
+
+    default:
+        return 0;
+    }
+}
+
+static void polar_setting_list_add(struct polar_setting_list *list, int32_t value)
+{
+    if ((list != NULL) && (list->count < POLAR_MAX_SETTING_VALUES))
+    {
+        list->values[list->count++] = value;
+    }
+}
+
+static int32_t polar_select_setting(const struct polar_setting_list *list,
+                                    int32_t preferred)
+{
+    uint8_t i;
+
+    if ((list == NULL) || (list->count == 0))
+    {
+        return -1;
+    }
+
+    for (i = 0; i < list->count; i++)
+    {
+        if (list->values[i] == preferred)
+        {
+            return list->values[i];
+        }
+    }
+
+    return list->values[0];
+}
+
+static void polar_append_selected_tlv(uint8_t setting_type, int32_t value)
+{
+    uint8_t field_size = polar_setting_field_size(setting_type);
+    uint8_t i;
+
+    if ((field_size == 0) ||
+        ((s_polar.acc_selected_tlvs_len + 2 + field_size) > POLAR_ACC_TLV_MAX_LEN))
+    {
+        return;
+    }
+
+    s_polar.acc_selected_tlvs[s_polar.acc_selected_tlvs_len++] = setting_type;
+    s_polar.acc_selected_tlvs[s_polar.acc_selected_tlvs_len++] = 1;
+    for (i = 0; i < field_size; i++)
+    {
+        s_polar.acc_selected_tlvs[s_polar.acc_selected_tlvs_len++] =
+            (uint8_t)((value >> (i * 8)) & 0xFF);
+    }
+    s_polar.acc_selected_tlv_count++;
+}
+
 static void polar_parse_acc_settings(const uint8_t *data, uint16_t len)
 {
-    /* Build TLV payload selecting preferred settings */
+    struct polar_setting_list sample_rates = {0};
+    struct polar_setting_list resolutions = {0};
+    struct polar_setting_list ranges = {0};
+    struct polar_setting_list range_milliunits = {0};
+    struct polar_setting_list channels = {0};
     s_polar.acc_selected_tlvs_len = 0;
+    s_polar.acc_selected_tlv_count = 0;
     s_polar.acc_sample_rate_hz    = 52;   /* default */
 
     uint16_t pos = 0;
-    while (pos + 2 < len)
+    while ((pos + 2) <= len)
     {
-        uint8_t type      = data[pos];
-        uint8_t val_count = data[pos + 1];
-        pos += 2;
-
-        if (pos + (uint16_t)val_count * 2 > len) break;
-
-        /* Pick preferred value */
-        uint16_t selected = 0;
+        uint8_t type = data[pos++];
+        uint8_t val_count = data[pos++];
+        uint8_t field_size = polar_setting_field_size(type);
         uint8_t i;
-        switch (type)
+
+        if ((field_size == 0) || (pos + ((uint16_t)val_count * field_size) > len))
         {
-        case POLAR_SET_SAMPLE_RATE:
-            /* Prefer 52 Hz */
-            selected = 52;
-            for (i = 0; i < val_count; i++)
+            break;
+        }
+
+        for (i = 0; i < val_count; i++)
+        {
+            int32_t value = polar_parse_signed_le(&data[pos], field_size);
+
+            switch (type)
             {
-                uint16_t v = (uint16_t)data[pos + i * 2] |
-                             ((uint16_t)data[pos + i * 2 + 1] << 8);
-                if (v == 52) { selected = v; break; }
+            case POLAR_SET_SAMPLE_RATE:
+                polar_setting_list_add(&sample_rates, value);
+                break;
+            case POLAR_SET_RESOLUTION:
+                polar_setting_list_add(&resolutions, value);
+                break;
+            case POLAR_SET_RANGE:
+                polar_setting_list_add(&ranges, value);
+                break;
+            case POLAR_SET_RANGE_MILLIUNIT:
+                polar_setting_list_add(&range_milliunits, value);
+                break;
+            case POLAR_SET_CHANNELS:
+                polar_setting_list_add(&channels, value);
+                break;
+            default:
+                break;
             }
-            s_polar.acc_sample_rate_hz = selected;
-            break;
-        case POLAR_SET_RESOLUTION:
-            selected = 16;  /* 16-bit preferred */
-            break;
-        case POLAR_SET_RANGE:
-            selected = 8;   /* 8g preferred */
-            break;
-        case POLAR_SET_CHANNELS:
-            selected = 3;   /* XYZ */
-            break;
-        default:
-            /* Take first available */
-            if (val_count > 0)
-                selected = (uint16_t)data[pos] |
-                           ((uint16_t)data[pos + 1] << 8);
-            break;
-        }
 
-        /* Append TLV: [type, count=1, lo, hi] */
-        if (s_polar.acc_selected_tlvs_len + 4 <= POLAR_ACC_TLV_MAX_LEN)
-        {
-            s_polar.acc_selected_tlvs[s_polar.acc_selected_tlvs_len++] = type;
-            s_polar.acc_selected_tlvs[s_polar.acc_selected_tlvs_len++] = 1;
-            s_polar.acc_selected_tlvs[s_polar.acc_selected_tlvs_len++] =
-                (uint8_t)(selected & 0xFF);
-            s_polar.acc_selected_tlvs[s_polar.acc_selected_tlvs_len++] =
-                (uint8_t)(selected >> 8);
+            pos += field_size;
         }
+    }
 
-        pos += (uint16_t)val_count * 2;
+    if (sample_rates.count > 0)
+    {
+        int32_t selected = polar_select_setting(&sample_rates, 52);
+        s_polar.acc_sample_rate_hz = (uint16_t)selected;
+        polar_append_selected_tlv(POLAR_SET_SAMPLE_RATE, selected);
+    }
+
+    if (resolutions.count > 0)
+    {
+        int32_t selected = polar_select_setting(&resolutions, 16);
+        polar_append_selected_tlv(POLAR_SET_RESOLUTION, selected);
+    }
+
+    if (ranges.count > 0)
+    {
+        int32_t selected = polar_select_setting(&ranges, 8);
+        polar_append_selected_tlv(POLAR_SET_RANGE, selected);
+    }
+    else if (range_milliunits.count > 0)
+    {
+        int32_t selected = polar_select_setting(&range_milliunits, -1);
+        polar_append_selected_tlv(POLAR_SET_RANGE_MILLIUNIT, selected);
+    }
+
+    if (channels.count > 0)
+    {
+        int32_t selected = polar_select_setting(&channels, 3);
+        polar_append_selected_tlv(POLAR_SET_CHANNELS, selected);
     }
 }
 
@@ -641,7 +753,7 @@ static void polar_handle_cp_event(const uint8_t *value, uint16_t length)
         }
 
         /* Start accelerometer measurement */
-        polar_log_acc_cfg(s_polar.acc_sample_rate_hz, s_polar.acc_selected_tlvs_len / 4);
+        polar_log_acc_cfg(s_polar.acc_sample_rate_hz, s_polar.acc_selected_tlv_count);
         polar_log_state_change(s_polar.state, POLAR_START_ACC, "acc start");
         s_polar.state = POLAR_START_ACC;
         polar_send_cp_cmd(POLAR_PMD_OP_START_MEAS, POLAR_PMD_MEAS_ACC,
@@ -741,19 +853,33 @@ static void polar_on_disc_desc(const struct gattc_disc_char_desc_ind *ind)
 /*
  * STATE MACHINE — GATTC_CMP_EVT
  */
+static void polar_disconnect_setup_error(void)
+{
+    struct gapc_disconnect_cmd *cmd = KE_MSG_ALLOC(
+        GAPC_DISCONNECT_CMD,
+        KE_BUILD_ID(TASK_GAPC, s_polar.conidx), TASK_APP,
+        gapc_disconnect_cmd);
+    cmd->operation = GAPC_DISCONNECT;
+    cmd->reason    = CO_ERROR_REMOTE_USER_TERM_CON;
+    KE_MSG_SEND(cmd);
+}
+
 static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
 {
-    if (evt->status != ATT_ERR_NO_ERROR && evt->status != GAP_ERR_NO_ERROR)
+    bool discovery_cmp = (evt->operation == GATTC_DISC_BY_UUID_SVC) ||
+                         (evt->operation == GATTC_DISC_ALL_CHAR) ||
+                         (evt->operation == GATTC_DISC_DESC_CHAR);
+    bool discovery_complete = discovery_cmp &&
+                              ((evt->status == ATT_ERR_NO_ERROR) ||
+                               (evt->status == ATT_ERR_ATTRIBUTE_NOT_FOUND));
+
+    if (!discovery_complete &&
+        evt->status != ATT_ERR_NO_ERROR &&
+        evt->status != GAP_ERR_NO_ERROR)
     {
         /* Discovery/write failed — disconnect and retry */
         paddling_pulse_console_printf("POLAR: gatt fail op=%u st=%u\r\n", evt->operation, evt->status);
-        struct gapc_disconnect_cmd *cmd = KE_MSG_ALLOC(
-            GAPC_DISCONNECT_CMD,
-            KE_BUILD_ID(TASK_GAPC, s_polar.conidx), TASK_APP,
-            gapc_disconnect_cmd);
-        cmd->operation = GAPC_DISCONNECT;
-        cmd->reason    = CO_ERROR_REMOTE_USER_TERM_CON;
-        KE_MSG_SEND(cmd);
+        polar_disconnect_setup_error();
         return;
     }
 
@@ -774,6 +900,7 @@ static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
             if (s_polar.svc_start == 0)
             {
                 polar_log("svc missing");
+                polar_disconnect_setup_error();
                 break;  /* service not found */
             }
             polar_log_state_change(s_polar.state, POLAR_DISC_CHARS, "chars disc");
@@ -788,6 +915,7 @@ static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
             if (s_polar.cp_handle == 0 || s_polar.data_handle == 0)
             {
                 polar_log("chars missing");
+                polar_disconnect_setup_error();
                 break;
             }
             polar_log_state_change(s_polar.state, POLAR_DISC_CP_CCCD, "cp cccd disc");
@@ -804,6 +932,7 @@ static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
             if (s_polar.cp_cccd_handle == 0)
             {
                 polar_log("cp cccd missing");
+                polar_disconnect_setup_error();
                 break;
             }
             polar_log_state_change(s_polar.state, POLAR_DISC_DATA_CCCD, "data cccd disc");
@@ -820,6 +949,7 @@ static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
             if (s_polar.data_cccd_handle == 0)
             {
                 polar_log("data cccd missing");
+                polar_disconnect_setup_error();
                 break;
             }
             polar_log_state_change(s_polar.state, POLAR_ENABLE_CP_NTF, "cp ind req");
@@ -873,6 +1003,7 @@ static void polar_clear_handles(void)
     s_polar.data_cccd_handle = 0;
     s_polar.cp_rsp_len       = 0;
     s_polar.acc_selected_tlvs_len = 0;
+    s_polar.acc_selected_tlv_count = 0;
 }
 
 static void polar_reset(void)
@@ -889,8 +1020,7 @@ static void polar_reset(void)
     memset(&s_polar, 0, sizeof(s_polar));
     s_polar.conidx = GAP_INVALID_CONIDX;
     s_polar.conhdl = GAP_INVALID_CONHDL;
-    s_timeout_cancel_pending = false;
-    s_stop_cancel_pending    = false;
+    s_stop_cancel_pending = false;
 }
 
 static void polar_retry_if_needed(void)
@@ -992,6 +1122,7 @@ void pp_imu_polar_on_adv_report(struct gapm_adv_report_ind const *param)
 void pp_imu_polar_on_scan_complete(uint8_t status)
 {
     polar_log_status("scan complete", status);
+    polar_log_app_states("scan complete");
     if (s_polar.state == POLAR_CONNECTING)
     {
         /* Deferred connect to avoid calling GAP within GAP callback */
@@ -1002,6 +1133,30 @@ void pp_imu_polar_on_scan_complete(uint8_t status)
         /* Scan timed out — retry */
         polar_log("scan retry");
         s_polar.state = POLAR_IDLE;
+        polar_retry_if_needed();
+    }
+}
+
+void pp_imu_polar_on_connect_failed(void)
+{
+    if (s_polar.state != POLAR_CONNECTING) return;
+
+    if (s_connect_timer != EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(s_connect_timer);
+        s_connect_timer = EASY_TIMER_INVALID_TIMER;
+    }
+
+    ke_state_set(TASK_APP, APP_CONNECTED);
+
+    if (s_stop_cancel_pending)
+    {
+        s_stop_cancel_pending = false;
+        polar_reset();
+    }
+    else
+    {
+        polar_log("connect failed");
         polar_retry_if_needed();
     }
 }
@@ -1125,36 +1280,26 @@ bool pp_imu_polar_handle_message(ke_msg_id_t msgid,
     {
         const struct gapm_cmp_evt *evt = (const struct gapm_cmp_evt *)param;
 
+        if (evt->operation == GAPM_CONNECTION_DIRECT)
+        {
+            polar_log_status("connect cmp", evt->status);
+            polar_log_app_states("connect cmp");
+        }
+
         if (evt->operation == GAPM_CANCEL)
         {
+            polar_log_status("cancel cmp", evt->status);
+            polar_log_app_states("cancel cmp");
+
             if (s_stop_cancel_pending)
             {
                 s_stop_cancel_pending = false;
-                /* Stop was requested. polar_reset() was NOT called in
-                   pp_imu_polar_stop() to keep state alive for this handler.
-                   Call it now. */
                 polar_reset();
                 return true;
             }
-            if (s_timeout_cancel_pending)
-            {
-                s_timeout_cancel_pending = false;
-                polar_retry_if_needed();
-                return true;
-            }
-            /* Scan-cancel-before-connect: no flag set, fall through.
-               The scan completion callback handles this path by scheduling
-               the deferred connect via pp_imu_polar_on_scan_complete(). */
-        }
-
-        if (evt->operation == GAPM_CONNECTION_DIRECT &&
-            evt->status != GAP_ERR_NO_ERROR &&
-            s_polar.state == POLAR_CONNECTING)
-        {
-            polar_log_status("connect fail", evt->status);
-            ke_state_set(TASK_APP, APP_CONNECTED);
-            polar_retry_if_needed();
-            return true;
+            /* Scan-cancel-before-connect and timeout-cancel are intentionally
+               left unchanged in this task. Task 2 and Task 3 use the captured
+               status values to decide the minimal fix. */
         }
     } break;
 
