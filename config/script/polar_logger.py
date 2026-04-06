@@ -308,3 +308,114 @@ class CsvLogger:
 
     def close(self) -> None:
         self.file.close()
+
+
+# ---------------------------------------------------------------------------
+# BLE connection — mirrors firmware state machine
+# ---------------------------------------------------------------------------
+SCAN_TIMEOUT = 10.0
+
+
+async def main() -> None:
+    # --- Scan ---
+    print("Scanning for Polar Verity Sense...")
+    try:
+        device = await BleakScanner.find_device_by_filter(
+            lambda d, _adv: d.name and "Polar" in d.name and "Sense" in d.name,
+            timeout=SCAN_TIMEOUT,
+        )
+    except (BleakError, OSError) as e:
+        print(f"BLE adapter error: {e}")
+        sys.exit(1)
+
+    if device is None:
+        print("No Polar Verity Sense found. Make sure the sensor is on and in range.")
+        sys.exit(1)
+
+    logger = CsvLogger()
+    shutdown_event = asyncio.Event()
+    snapshot_task: asyncio.Task | None = None
+
+    async def periodic_snapshot() -> None:
+        try:
+            while not shutdown_event.is_set():
+                await asyncio.sleep(1.0)
+                logger.write_snapshot()
+        except asyncio.CancelledError:
+            pass
+
+    def on_disconnect(_client) -> None:
+        print("\nPolar disconnected unexpectedly.")
+        logger.close()
+        shutdown_event.set()
+
+    async with BleakClient(device, disconnected_callback=on_disconnect) as client:
+        print(f"Connected to {device.name} ({device.address})")
+
+        # --- Subscribe to CP indications before writing commands ---
+        # We send one CP command at a time and await its response, so
+        # opcode validation is not needed — the response always matches.
+        loop = asyncio.get_running_loop()
+        cp_response: asyncio.Future = loop.create_future()
+
+        def on_cp_indication(_sender, data: bytearray) -> None:
+            if not cp_response.done():
+                cp_response.set_result(bytes(data))
+
+        await client.start_notify(PMD_CP_UUID, on_cp_indication)
+
+        # --- Get ACC settings ---
+        await client.write_gatt_char(PMD_CP_UUID, bytes([OP_GET_SETTINGS, MEAS_ACC]),
+                                     response=True)
+        cp_data = await asyncio.wait_for(cp_response, timeout=5.0)
+
+        if len(cp_data) < 4 or cp_data[0] != CP_RSP_CODE or cp_data[3] != STATUS_SUCCESS:
+            print(f"GET_SETTINGS failed: {cp_data.hex()}")
+            sys.exit(1)
+
+        sample_rate_hz, selected_tlvs = parse_acc_settings(cp_data[5:])
+        print(f"Streaming ACC @ {sample_rate_hz} Hz, logging to {logger.path}")
+
+        # --- Start ACC measurement ---
+        cp_response = loop.create_future()
+        cmd = bytes([OP_START_MEAS, MEAS_ACC]) + selected_tlvs
+        await client.write_gatt_char(PMD_CP_UUID, cmd, response=True)
+        cp_data = await asyncio.wait_for(cp_response, timeout=5.0)
+
+        if len(cp_data) < 4 or cp_data[0] != CP_RSP_CODE or cp_data[3] != STATUS_SUCCESS:
+            print(f"START_MEAS failed: {cp_data.hex()}")
+            sys.exit(1)
+
+        # --- Subscribe to Data notifications ---
+        await client.start_notify(PMD_DATA_UUID, handle_acc_notification)
+
+        # --- Periodic CSV snapshots ---
+        snapshot_task = asyncio.create_task(periodic_snapshot())
+
+        # --- Wait for Ctrl+C or unexpected disconnect ---
+        try:
+            await snapshot_task
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            pass
+        finally:
+            if snapshot_task and not snapshot_task.done():
+                snapshot_task.cancel()
+            # Stop measurement
+            if not shutdown_event.is_set():
+                try:
+                    await client.write_gatt_char(PMD_CP_UUID,
+                                                 bytes([OP_STOP_MEAS, MEAS_ACC]),
+                                                 response=True)
+                except Exception:
+                    pass
+
+    if not shutdown_event.is_set():
+        logger.close()
+    print(f"Stopping... logged {logger.row_count} rows to {logger.path.name}")
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
