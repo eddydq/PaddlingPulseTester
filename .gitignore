@@ -2,5 +2,6 @@ build/
 config/local.mk
 config/local/
 .claude/
+.worktrees/
 tests/
 __pycache__/
