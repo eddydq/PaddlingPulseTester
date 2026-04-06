@@ -165,6 +165,21 @@ def _tone_window(
     ).tolist()
 
 
+def _ramp_window(
+    *,
+    sample_count: int = 512,
+) -> list[float]:
+    return np.linspace(0.0, 1.0, sample_count, dtype=float).tolist()
+
+
+def _seeded_noise_window(
+    seed: int,
+    *,
+    sample_count: int = 512,
+) -> list[float]:
+    return np.random.default_rng(seed).normal(0.0, 1.0, sample_count).tolist()
+
+
 def _tone_amplitude(
     values: list[float],
     frequency_hz: float,
@@ -299,6 +314,18 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
 
         self.assertIsNotNone(period)
         self.assertAlmostEqual(period, 52, delta=2)
+
+    def test_yin_period_candidate_returns_none_for_seeded_noise_window(self):
+        common = _load_common_module()
+        filtered = common._zero_phase_bandpass(_seeded_noise_window(0))
+
+        self.assertIsNone(common._yin_period_candidate(filtered))
+
+    def test_yin_period_candidate_returns_none_for_ramp_window(self):
+        common = _load_common_module()
+        filtered = common._zero_phase_bandpass(_ramp_window())
+
+        self.assertIsNone(common._yin_period_candidate(filtered))
 
     def test_cepstrum_period_candidate_tracks_known_rate(self):
         common = _load_common_module()
@@ -448,6 +475,22 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
         self.assertGreater(estimate, 20.0)
         self.assertLess(estimate, 120.0)
         self.assertAlmostEqual(estimate, 61.5, delta=1.0)
+
+    def test_consensus_music_estimator_returns_zero_for_seeded_noise_window(self):
+        common = _load_common_module()
+
+        self.assertEqual(
+            common.estimate_consensus_music_stroke_rate(_seeded_noise_window(0)),
+            0.0,
+        )
+
+    def test_consensus_music_estimator_returns_zero_for_ramp_window(self):
+        common = _load_common_module()
+
+        self.assertEqual(
+            common.estimate_consensus_music_stroke_rate(_ramp_window()),
+            0.0,
+        )
 
     def test_consensus_music_estimator_returns_zero_for_invalid_parameters(self):
         common = _load_common_module()

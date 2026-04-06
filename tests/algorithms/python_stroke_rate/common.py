@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import math
 
 SAMPLE_STORE_CAPACITY = 512
@@ -10,12 +11,32 @@ PEAK_SCORE_FRACTION = 0.8
 BUTTERWORTH_ORDER = 4
 FILTER_MARGIN_HZ = 0.10
 YIN_THRESHOLD = 0.15
+YIN_FALLBACK_MAX_CMNDF = 0.25
 NUMERICAL_EPSILON = 1e-12
 CONSENSUS_TOLERANCE_FRACTION = 0.05
 CONSENSUS_MARGIN_SAMPLES = 2
 MUSIC_GRID_SIZE = 4096
 MUSIC_SNAPSHOT_LENGTH = 96
 MUSIC_MIN_PEAK_PROMINENCE_RATIO = 2.0
+
+_NUMPY_MODULE = None
+_SCIPY_SIGNAL_MODULE = None
+
+
+def _get_numpy():
+    global _NUMPY_MODULE
+
+    if _NUMPY_MODULE is None:
+        _NUMPY_MODULE = importlib.import_module("numpy")
+    return _NUMPY_MODULE
+
+
+def _get_scipy_signal():
+    global _SCIPY_SIGNAL_MODULE
+
+    if _SCIPY_SIGNAL_MODULE is None:
+        _SCIPY_SIGNAL_MODULE = importlib.import_module("scipy.signal")
+    return _SCIPY_SIGNAL_MODULE
 
 
 def _stroke_rate_bounds_hz(
@@ -62,8 +83,8 @@ def _zero_phase_bandpass(
     if sample_rate_hz <= 0.0:
         return []
 
-    import numpy as np
-    from scipy.signal import butter, filtfilt
+    np = _get_numpy()
+    scipy_signal = _get_scipy_signal()
 
     low_hz, high_hz = _stroke_rate_bounds_hz(
         sample_rate_hz=sample_rate_hz,
@@ -71,7 +92,7 @@ def _zero_phase_bandpass(
         max_stroke_rate_spm=max_stroke_rate_spm,
     )
     centered = np.asarray(values, dtype=float) - float(np.mean(values))
-    b_coefficients, a_coefficients = butter(
+    b_coefficients, a_coefficients = scipy_signal.butter(
         BUTTERWORTH_ORDER,
         [low_hz, high_hz],
         btype="bandpass",
@@ -80,7 +101,7 @@ def _zero_phase_bandpass(
     padlen = 3 * max(len(a_coefficients), len(b_coefficients))
     if len(centered) <= padlen:
         return []
-    return filtfilt(b_coefficients, a_coefficients, centered).tolist()
+    return scipy_signal.filtfilt(b_coefficients, a_coefficients, centered).tolist()
 
 
 def _yin_period_candidate(
@@ -94,7 +115,7 @@ def _yin_period_candidate(
     if len(values) < 2:
         return None
 
-    import numpy as np
+    np = _get_numpy()
 
     samples = np.asarray(values, dtype=float)
     min_lag = max(1, math.ceil((sample_rate_hz * 60.0) / max_stroke_rate_spm))
@@ -130,6 +151,8 @@ def _yin_period_candidate(
             return lag
 
     best_lag = min(range(min_lag, max_lag + 1), key=lambda lag_value: cmndf[lag_value])
+    if float(cmndf[best_lag]) > YIN_FALLBACK_MAX_CMNDF:
+        return None
     return int(best_lag)
 
 
@@ -143,7 +166,7 @@ def _cepstrum_period_candidate(
     if len(values) < 2:
         return None
 
-    import numpy as np
+    np = _get_numpy()
 
     samples = np.asarray(values, dtype=float)
     min_lag = max(1, math.ceil((sample_rate_hz * 60.0) / max_stroke_rate_spm))
@@ -208,7 +231,7 @@ def _music_frequency_hz(
     high_frequency_hz: float,
     grid_size: int = MUSIC_GRID_SIZE,
 ) -> float | None:
-    import numpy as np
+    np = _get_numpy()
 
     samples = np.asarray(values, dtype=float)
     if (
@@ -226,13 +249,11 @@ def _music_frequency_hz(
         return None
 
     snapshot_length = min(MUSIC_SNAPSHOT_LENGTH, samples.size // 2)
-    column_count = samples.size - snapshot_length + 1
+    trajectory = np.lib.stride_tricks.sliding_window_view(samples, snapshot_length).T
+    column_count = trajectory.shape[1]
     if column_count <= 1:
         return None
 
-    trajectory = np.column_stack(
-        [samples[index : index + snapshot_length] for index in range(column_count)]
-    )
     covariance = (trajectory @ trajectory.T) / float(column_count)
     eigenvalues, eigenvectors = np.linalg.eigh(covariance)
     if not np.isfinite(eigenvalues).all():
@@ -244,15 +265,13 @@ def _music_frequency_hz(
     noise_subspace = eigenvectors[:, :-2]
     sample_index = np.arange(snapshot_length, dtype=float)
     frequency_grid_hz = np.linspace(low_frequency_hz, high_frequency_hz, grid_size)
-    pseudospectrum = np.empty_like(frequency_grid_hz)
-
-    for grid_index, frequency_hz in enumerate(frequency_grid_hz):
-        steering = np.exp(
-            (-2.0j * np.pi * frequency_hz * sample_index) / sample_rate_hz
-        )
-        projection = noise_subspace.conj().T @ steering
-        denominator = float(np.vdot(projection, projection).real)
-        pseudospectrum[grid_index] = 1.0 / max(denominator, NUMERICAL_EPSILON)
+    steering_matrix = np.exp(
+        (-2.0j * np.pi / sample_rate_hz)
+        * np.outer(frequency_grid_hz, sample_index)
+    )
+    projections = steering_matrix @ noise_subspace.conj()
+    denominators = np.sum(np.abs(projections) ** 2, axis=1)
+    pseudospectrum = 1.0 / np.maximum(denominators, NUMERICAL_EPSILON)
 
     if not np.isfinite(pseudospectrum).all():
         return None
