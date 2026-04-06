@@ -307,7 +307,8 @@ class CsvLogger:
         print(f"[{count}/{SAMPLE_STORE_CAPACITY}] x={latest_x} y={latest_y} z={latest_z}")
 
     def close(self) -> None:
-        self.file.close()
+        if not self.file.closed:
+            self.file.close()
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +396,7 @@ async def main() -> None:
         # --- Wait for Ctrl+C or unexpected disconnect ---
         try:
             await snapshot_task
-        except (asyncio.CancelledError, KeyboardInterrupt):
+        except asyncio.CancelledError:
             pass
         finally:
             if snapshot_task and not snapshot_task.done():
