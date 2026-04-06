@@ -246,6 +246,20 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
         self.assertIsNotNone(period)
         self.assertAlmostEqual(period, 40, delta=2)
 
+    def test_period_candidates_return_none_for_flat_window(self):
+        common = _load_common_module()
+        flat_window = [0.0] * 512
+
+        self.assertIsNone(common._yin_period_candidate(flat_window))
+        self.assertIsNone(common._cepstrum_period_candidate(flat_window))
+
+    def test_period_candidates_return_none_for_undersized_window(self):
+        common = _load_common_module()
+        undersized_window = [0.0] * 26
+
+        self.assertIsNone(common._yin_period_candidate(undersized_window))
+        self.assertIsNone(common._cepstrum_period_candidate(undersized_window))
+
 
 if __name__ == "__main__":
     unittest.main()

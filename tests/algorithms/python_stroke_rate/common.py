@@ -89,15 +89,21 @@ def _yin_period_candidate(
     if len(values) < 2:
         return None
 
+    import numpy as np
+
+    samples = np.asarray(values, dtype=float)
+    min_lag = max(1, math.ceil((sample_rate_hz * 60.0) / max_stroke_rate_spm))
+    if len(samples) <= min_lag or not np.isfinite(samples).all():
+        return None
+    if float(np.ptp(samples)) <= NUMERICAL_EPSILON:
+        return None
+
     min_lag, max_lag = _stroke_rate_lag_bounds(
         len(values),
         sample_rate_hz=sample_rate_hz,
         min_stroke_rate_spm=min_stroke_rate_spm,
         max_stroke_rate_spm=max_stroke_rate_spm,
     )
-    import numpy as np
-
-    samples = np.asarray(values, dtype=float)
     difference = np.zeros(max_lag + 1, dtype=float)
 
     for lag in range(1, max_lag + 1):
@@ -132,15 +138,22 @@ def _cepstrum_period_candidate(
     if len(values) < 2:
         return None
 
+    import numpy as np
+
+    samples = np.asarray(values, dtype=float)
+    min_lag = max(1, math.ceil((sample_rate_hz * 60.0) / max_stroke_rate_spm))
+    if len(samples) <= min_lag or not np.isfinite(samples).all():
+        return None
+    if float(np.ptp(samples)) <= NUMERICAL_EPSILON:
+        return None
+
     min_lag, max_lag = _stroke_rate_lag_bounds(
         len(values),
         sample_rate_hz=sample_rate_hz,
         min_stroke_rate_spm=min_stroke_rate_spm,
         max_stroke_rate_spm=max_stroke_rate_spm,
     )
-    import numpy as np
-
-    spectrum = np.fft.rfft(np.asarray(values, dtype=float))
+    spectrum = np.fft.rfft(samples)
     log_magnitude = np.log(np.maximum(np.abs(spectrum), NUMERICAL_EPSILON))
     cepstrum = np.fft.irfft(log_magnitude, n=len(values))
     search = cepstrum[min_lag : max_lag + 1]
