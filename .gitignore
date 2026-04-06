@@ -3,3 +3,4 @@ config/local.mk
 config/local/
 .claude/
 tests/
+__pycache__/
