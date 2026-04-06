@@ -212,9 +212,13 @@ def _music_frequency_hz(
     samples = np.asarray(values, dtype=float)
     if (
         samples.size < 32
+        or not math.isfinite(sample_rate_hz)
+        or not math.isfinite(low_frequency_hz)
+        or not math.isfinite(high_frequency_hz)
         or sample_rate_hz <= 0.0
         or low_frequency_hz <= 0.0
         or high_frequency_hz <= low_frequency_hz
+        or grid_size <= 0
     ):
         return None
 

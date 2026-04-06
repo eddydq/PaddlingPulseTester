@@ -299,6 +299,48 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
         coarse_spm = (52.0 * 60.0) / 54.0
         self.assertLess(abs(refined_spm - expected_spm), abs(coarse_spm - expected_spm))
 
+    def test_music_frequency_returns_none_for_non_finite_numeric_parameters(self):
+        common = _load_common_module()
+        filtered = common._zero_phase_bandpass(_sinusoid_window(58.25, harmonic=0.05))
+
+        invalid_cases = (
+            {
+                "sample_rate_hz": float("nan"),
+                "low_frequency_hz": 52.0 / 56.0,
+                "high_frequency_hz": 52.0 / 51.0,
+            },
+            {
+                "sample_rate_hz": 52.0,
+                "low_frequency_hz": float("nan"),
+                "high_frequency_hz": 52.0 / 51.0,
+            },
+            {
+                "sample_rate_hz": 52.0,
+                "low_frequency_hz": 52.0 / 56.0,
+                "high_frequency_hz": float("inf"),
+            },
+        )
+
+        for kwargs in invalid_cases:
+            with self.subTest(kwargs=kwargs):
+                self.assertIsNone(common._music_frequency_hz(filtered, **kwargs))
+
+    def test_music_frequency_returns_none_for_invalid_grid_size(self):
+        common = _load_common_module()
+        filtered = common._zero_phase_bandpass(_sinusoid_window(58.25, harmonic=0.05))
+
+        for grid_size in (0, -4):
+            with self.subTest(grid_size=grid_size):
+                self.assertIsNone(
+                    common._music_frequency_hz(
+                        filtered,
+                        sample_rate_hz=52.0,
+                        low_frequency_hz=52.0 / 56.0,
+                        high_frequency_hz=52.0 / 51.0,
+                        grid_size=grid_size,
+                    )
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
