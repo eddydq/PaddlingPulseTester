@@ -26,8 +26,11 @@ def _load_calculator_module():
 
 
 def _load_algorithm_module(stem: str):
+    algorithms_dir = Path("tests/algorithms/python_stroke_rate").resolve()
+    if str(algorithms_dir) not in sys.path:
+        sys.path.insert(0, str(algorithms_dir))
     return _load_module(
-        Path(f"tests/algorithms/python_stroke_rate/{stem}.py"),
+        algorithms_dir / f"{stem}.py",
         f"stroke_rate_algorithm_{stem}",
     )
 
@@ -85,6 +88,27 @@ def _temporary_root(name: str):
     finally:
         if root.exists():
             shutil.rmtree(root)
+
+
+@contextmanager
+def _without_algorithm_import_side_effects():
+    algorithms_dir = Path("tests/algorithms/python_stroke_rate")
+    algorithm_paths = {
+        str(algorithms_dir),
+        str(algorithms_dir.resolve()),
+    }
+    original_sys_path = list(sys.path)
+    cached_common = sys.modules.pop("common", None)
+    cached_algorithm = sys.modules.pop("stroke_rate_algorithm_consensus_music_y", None)
+    sys.path[:] = [entry for entry in sys.path if entry not in algorithm_paths]
+    try:
+        yield
+    finally:
+        sys.path[:] = original_sys_path
+        if cached_common is not None:
+            sys.modules["common"] = cached_common
+        if cached_algorithm is not None:
+            sys.modules["stroke_rate_algorithm_consensus_music_y"] = cached_algorithm
 
 
 def _sinusoid_window(
@@ -404,12 +428,31 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
         self.assertLess(estimate, 120.0)
         self.assertAlmostEqual(estimate, 61.5, delta=1.0)
 
-    def test_consensus_music_y_calculate_reads_y_axis_snapshot(self):
-        algorithm = _load_algorithm_module("consensus_music_y")
+    def test_consensus_music_estimator_returns_zero_for_invalid_parameters(self):
+        common = _load_common_module()
+        values = _sinusoid_window(61.5, harmonic=0.10)
 
-        estimate = algorithm.calculate(
-            _snapshot_from_y(_sinusoid_window(61.5, harmonic=0.10))
+        invalid_cases = (
+            {"sample_rate_hz": float("nan")},
+            {"min_stroke_rate_spm": float("nan")},
+            {"max_stroke_rate_spm": float("nan")},
+            {"min_stroke_rate_spm": 90.0, "max_stroke_rate_spm": 45.0},
         )
+
+        for kwargs in invalid_cases:
+            with self.subTest(kwargs=kwargs):
+                self.assertEqual(
+                    common.estimate_consensus_music_stroke_rate(values, **kwargs),
+                    0.0,
+                )
+
+    def test_consensus_music_y_calculate_reads_y_axis_snapshot(self):
+        with _without_algorithm_import_side_effects():
+            algorithm = _load_algorithm_module("consensus_music_y")
+
+            estimate = algorithm.calculate(
+                _snapshot_from_y(_sinusoid_window(61.5, harmonic=0.10))
+            )
 
         self.assertAlmostEqual(estimate, 61.5, delta=1.0)
 

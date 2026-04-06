@@ -366,36 +366,61 @@ def estimate_consensus_music_stroke_rate(
     min_stroke_rate_spm: float = MIN_STROKE_RATE_SPM,
     max_stroke_rate_spm: float = MAX_STROKE_RATE_SPM,
 ) -> float:
-    if len(values) != SAMPLE_STORE_CAPACITY or sample_rate_hz <= 0.0:
+    try:
+        if not all(
+            math.isfinite(parameter)
+            for parameter in (
+                sample_rate_hz,
+                min_stroke_rate_spm,
+                max_stroke_rate_spm,
+            )
+        ):
+            return 0.0
+    except TypeError:
         return 0.0
 
-    filtered = _zero_phase_bandpass(
-        values,
-        sample_rate_hz=sample_rate_hz,
-        min_stroke_rate_spm=min_stroke_rate_spm,
-        max_stroke_rate_spm=max_stroke_rate_spm,
-    )
+    if (
+        len(values) != SAMPLE_STORE_CAPACITY
+        or sample_rate_hz <= 0.0
+        or min_stroke_rate_spm <= 0.0
+        or max_stroke_rate_spm <= 0.0
+        or min_stroke_rate_spm > max_stroke_rate_spm
+    ):
+        return 0.0
+
+    try:
+        filtered = _zero_phase_bandpass(
+            values,
+            sample_rate_hz=sample_rate_hz,
+            min_stroke_rate_spm=min_stroke_rate_spm,
+            max_stroke_rate_spm=max_stroke_rate_spm,
+        )
+    except (OverflowError, TypeError, ValueError):
+        return 0.0
     if len(filtered) != len(values):
         return 0.0
 
-    min_lag, max_lag = _stroke_rate_lag_bounds(
-        len(filtered),
-        sample_rate_hz=sample_rate_hz,
-        min_stroke_rate_spm=min_stroke_rate_spm,
-        max_stroke_rate_spm=max_stroke_rate_spm,
-    )
-    yin_period = _yin_period_candidate(
-        filtered,
-        sample_rate_hz=sample_rate_hz,
-        min_stroke_rate_spm=min_stroke_rate_spm,
-        max_stroke_rate_spm=max_stroke_rate_spm,
-    )
-    cepstrum_period = _cepstrum_period_candidate(
-        filtered,
-        sample_rate_hz=sample_rate_hz,
-        min_stroke_rate_spm=min_stroke_rate_spm,
-        max_stroke_rate_spm=max_stroke_rate_spm,
-    )
+    try:
+        min_lag, max_lag = _stroke_rate_lag_bounds(
+            len(filtered),
+            sample_rate_hz=sample_rate_hz,
+            min_stroke_rate_spm=min_stroke_rate_spm,
+            max_stroke_rate_spm=max_stroke_rate_spm,
+        )
+        yin_period = _yin_period_candidate(
+            filtered,
+            sample_rate_hz=sample_rate_hz,
+            min_stroke_rate_spm=min_stroke_rate_spm,
+            max_stroke_rate_spm=max_stroke_rate_spm,
+        )
+        cepstrum_period = _cepstrum_period_candidate(
+            filtered,
+            sample_rate_hz=sample_rate_hz,
+            min_stroke_rate_spm=min_stroke_rate_spm,
+            max_stroke_rate_spm=max_stroke_rate_spm,
+        )
+    except (OverflowError, TypeError, ValueError):
+        return 0.0
     period_band = _consensus_period_band(
         yin_period,
         cepstrum_period,
