@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
-from scipy.signal import butter, filtfilt
-
 SAMPLE_STORE_CAPACITY = 512
 SAMPLE_RATE_HZ = 52.0
 MIN_STROKE_RATE_SPM = 20.0
@@ -55,8 +52,11 @@ def _zero_phase_bandpass(
     min_stroke_rate_spm: float = MIN_STROKE_RATE_SPM,
     max_stroke_rate_spm: float = MAX_STROKE_RATE_SPM,
 ) -> list[float]:
-    if len(values) < 8 or sample_rate_hz <= 0.0:
+    if sample_rate_hz <= 0.0:
         return []
+
+    import numpy as np
+    from scipy.signal import butter, filtfilt
 
     low_hz, high_hz = _stroke_rate_bounds_hz(
         sample_rate_hz=sample_rate_hz,
@@ -70,6 +70,9 @@ def _zero_phase_bandpass(
         btype="bandpass",
         fs=sample_rate_hz,
     )
+    padlen = 3 * max(len(a_coefficients), len(b_coefficients))
+    if len(centered) <= padlen:
+        return []
     return filtfilt(b_coefficients, a_coefficients, centered).tolist()
 
 

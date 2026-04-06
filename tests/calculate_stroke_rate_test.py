@@ -89,6 +89,46 @@ def _sinusoid_window(
     return values.tolist()
 
 
+def _tone_window(
+    frequency_hz: float,
+    *,
+    amplitude: float = 1.0,
+    phase: float = 0.0,
+    sample_rate_hz: float = 52.0,
+    sample_count: int = 512,
+) -> list[float]:
+    time_axis = np.arange(sample_count, dtype=float) / sample_rate_hz
+    return (
+        amplitude * np.sin((2.0 * np.pi * frequency_hz * time_axis) + phase)
+    ).tolist()
+
+
+def _tone_amplitude(
+    values: list[float],
+    frequency_hz: float,
+    *,
+    sample_rate_hz: float = 52.0,
+) -> float:
+    time_axis = np.arange(len(values), dtype=float) / sample_rate_hz
+    centered = np.asarray(values, dtype=float) - np.mean(values)
+    sine = np.sin(2.0 * np.pi * frequency_hz * time_axis)
+    cosine = np.cos(2.0 * np.pi * frequency_hz * time_axis)
+    return float(
+        2.0
+        * np.hypot(np.dot(centered, sine), np.dot(centered, cosine))
+        / len(values)
+    )
+
+
+def _zero_lag(filtered: list[float], reference: list[float]) -> int:
+    filtered_centered = np.asarray(filtered) - np.mean(filtered)
+    reference_centered = np.asarray(reference) - np.mean(reference)
+    return int(
+        np.argmax(np.correlate(filtered_centered, reference_centered, mode="full"))
+        - (len(reference_centered) - 1)
+    )
+
+
 class CalculateStrokeRateWorkflowTest(unittest.TestCase):
     def test_logger_defaults_to_tests_raw_logs(self):
         logger_module = _load_logger_module()
@@ -171,20 +211,22 @@ class CalculateStrokeRateWorkflowTest(unittest.TestCase):
 
 
 class ConsensusMusicHelpersTest(unittest.TestCase):
-    def test_zero_phase_bandpass_keeps_zero_lag_correlation(self):
+    def test_zero_phase_bandpass_keeps_zero_lag_and_attenuates_out_of_band_tone(self):
         common = _load_common_module()
-        source = _sinusoid_window(60.0, harmonic=0.10)
+        in_band = _tone_window(1.0)
+        out_of_band = _tone_window(8.0, amplitude=0.35, phase=np.pi / 3.0)
+        source = (np.asarray(in_band) + np.asarray(out_of_band)).tolist()
 
         filtered = common._zero_phase_bandpass(source)
 
-        source_centered = np.asarray(source) - np.mean(source)
-        filtered_centered = np.asarray(filtered) - np.mean(filtered)
-        lag = int(
-            np.argmax(np.correlate(filtered_centered, source_centered, mode="full"))
-            - (len(source_centered) - 1)
-        )
+        self.assertEqual(_zero_lag(filtered, in_band), 0)
+        self.assertGreater(_tone_amplitude(filtered, 1.0), _tone_amplitude(source, 1.0) * 0.7)
+        self.assertLess(_tone_amplitude(filtered, 8.0), _tone_amplitude(source, 8.0) * 0.2)
 
-        self.assertEqual(lag, 0)
+    def test_zero_phase_bandpass_returns_empty_for_short_inputs(self):
+        common = _load_common_module()
+
+        self.assertEqual(common._zero_phase_bandpass([1.0] * 26), [])
 
 
 if __name__ == "__main__":
