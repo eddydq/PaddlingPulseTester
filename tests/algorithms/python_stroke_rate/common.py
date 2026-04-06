@@ -11,6 +11,10 @@ BUTTERWORTH_ORDER = 4
 FILTER_MARGIN_HZ = 0.10
 YIN_THRESHOLD = 0.15
 NUMERICAL_EPSILON = 1e-12
+CONSENSUS_TOLERANCE_FRACTION = 0.05
+CONSENSUS_MARGIN_SAMPLES = 2
+MUSIC_GRID_SIZE = 4096
+MUSIC_SNAPSHOT_LENGTH = 96
 
 
 def _stroke_rate_bounds_hz(
@@ -160,6 +164,90 @@ def _cepstrum_period_candidate(
     if search.size == 0 or not np.isfinite(search).all():
         return None
     return int(min_lag + int(np.argmax(search)))
+
+
+def _consensus_period_band(
+    yin_period: int | None,
+    cepstrum_period: int | None,
+    *,
+    min_lag: int,
+    max_lag: int,
+    tolerance_fraction: float = CONSENSUS_TOLERANCE_FRACTION,
+) -> tuple[int, int] | None:
+    candidates = [
+        period
+        for period in (yin_period, cepstrum_period)
+        if period is not None and min_lag <= period <= max_lag
+    ]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        period = candidates[0]
+        return (
+            max(min_lag, period - CONSENSUS_MARGIN_SAMPLES),
+            min(max_lag, period + CONSENSUS_MARGIN_SAMPLES),
+        )
+
+    lower = min(candidates)
+    upper = max(candidates)
+    tolerance_samples = max(1, math.ceil(lower * tolerance_fraction))
+    if upper - lower <= tolerance_samples:
+        return (
+            max(min_lag, lower - CONSENSUS_MARGIN_SAMPLES),
+            min(max_lag, upper + CONSENSUS_MARGIN_SAMPLES),
+        )
+    return (lower, upper)
+
+
+def _music_frequency_hz(
+    values: list[float],
+    *,
+    sample_rate_hz: float,
+    low_frequency_hz: float,
+    high_frequency_hz: float,
+    grid_size: int = MUSIC_GRID_SIZE,
+) -> float | None:
+    import numpy as np
+
+    samples = np.asarray(values, dtype=float)
+    if (
+        samples.size < 32
+        or sample_rate_hz <= 0.0
+        or low_frequency_hz <= 0.0
+        or high_frequency_hz <= low_frequency_hz
+    ):
+        return None
+
+    snapshot_length = min(MUSIC_SNAPSHOT_LENGTH, samples.size // 2)
+    column_count = samples.size - snapshot_length + 1
+    if column_count <= 1:
+        return None
+
+    trajectory = np.column_stack(
+        [samples[index : index + snapshot_length] for index in range(column_count)]
+    )
+    covariance = (trajectory @ trajectory.T) / float(column_count)
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    if not np.isfinite(eigenvalues).all():
+        return None
+
+    if eigenvectors.shape[1] <= 2:
+        return None
+
+    noise_subspace = eigenvectors[:, :-2]
+    sample_index = np.arange(snapshot_length, dtype=float)
+    frequency_grid_hz = np.linspace(low_frequency_hz, high_frequency_hz, grid_size)
+    pseudospectrum = np.empty_like(frequency_grid_hz)
+
+    for grid_index, frequency_hz in enumerate(frequency_grid_hz):
+        steering = np.exp(
+            (-2.0j * np.pi * frequency_hz * sample_index) / sample_rate_hz
+        )
+        projection = noise_subspace.conj().T @ steering
+        denominator = float(np.vdot(projection, projection).real)
+        pseudospectrum[grid_index] = 1.0 / max(denominator, NUMERICAL_EPSILON)
+
+    return float(frequency_grid_hz[int(np.argmax(pseudospectrum))])
 
 
 def magnitude_series(series: dict[str, list[float]]) -> list[float]:

@@ -260,6 +260,45 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
         self.assertIsNone(common._yin_period_candidate(undersized_window))
         self.assertIsNone(common._cepstrum_period_candidate(undersized_window))
 
+    def test_consensus_period_band_is_narrow_when_estimators_agree(self):
+        common = _load_common_module()
+
+        band = common._consensus_period_band(52, 53, min_lag=26, max_lag=156)
+
+        self.assertEqual(band, (50, 55))
+
+    def test_consensus_period_band_spans_candidates_when_estimators_disagree(self):
+        common = _load_common_module()
+
+        band = common._consensus_period_band(40, 52, min_lag=26, max_lag=156)
+
+        self.assertEqual(band, (40, 52))
+
+    def test_music_frequency_refines_known_rate(self):
+        common = _load_common_module()
+        expected_spm = 58.25
+        filtered = common._zero_phase_bandpass(
+            _sinusoid_window(expected_spm, harmonic=0.05)
+        )
+        band = common._consensus_period_band(53, 54, min_lag=26, max_lag=156)
+
+        self.assertIsNotNone(band)
+
+        low_frequency_hz = 52.0 / band[1]
+        high_frequency_hz = 52.0 / band[0]
+        refined_frequency_hz = common._music_frequency_hz(
+            filtered,
+            sample_rate_hz=52.0,
+            low_frequency_hz=low_frequency_hz,
+            high_frequency_hz=high_frequency_hz,
+        )
+
+        self.assertIsNotNone(refined_frequency_hz)
+
+        refined_spm = refined_frequency_hz * 60.0
+        coarse_spm = (52.0 * 60.0) / 54.0
+        self.assertLess(abs(refined_spm - expected_spm), abs(coarse_spm - expected_spm))
+
 
 if __name__ == "__main__":
     unittest.main()
