@@ -357,3 +357,66 @@ def estimate_autocorrelation_stroke_rate(
         return 0.0
 
     return (sample_rate_hz * 60.0) / best_lag
+
+
+def estimate_consensus_music_stroke_rate(
+    values: list[float],
+    *,
+    sample_rate_hz: float = SAMPLE_RATE_HZ,
+    min_stroke_rate_spm: float = MIN_STROKE_RATE_SPM,
+    max_stroke_rate_spm: float = MAX_STROKE_RATE_SPM,
+) -> float:
+    if len(values) != SAMPLE_STORE_CAPACITY or sample_rate_hz <= 0.0:
+        return 0.0
+
+    filtered = _zero_phase_bandpass(
+        values,
+        sample_rate_hz=sample_rate_hz,
+        min_stroke_rate_spm=min_stroke_rate_spm,
+        max_stroke_rate_spm=max_stroke_rate_spm,
+    )
+    if len(filtered) != len(values):
+        return 0.0
+
+    min_lag, max_lag = _stroke_rate_lag_bounds(
+        len(filtered),
+        sample_rate_hz=sample_rate_hz,
+        min_stroke_rate_spm=min_stroke_rate_spm,
+        max_stroke_rate_spm=max_stroke_rate_spm,
+    )
+    yin_period = _yin_period_candidate(
+        filtered,
+        sample_rate_hz=sample_rate_hz,
+        min_stroke_rate_spm=min_stroke_rate_spm,
+        max_stroke_rate_spm=max_stroke_rate_spm,
+    )
+    cepstrum_period = _cepstrum_period_candidate(
+        filtered,
+        sample_rate_hz=sample_rate_hz,
+        min_stroke_rate_spm=min_stroke_rate_spm,
+        max_stroke_rate_spm=max_stroke_rate_spm,
+    )
+    period_band = _consensus_period_band(
+        yin_period,
+        cepstrum_period,
+        min_lag=min_lag,
+        max_lag=max_lag,
+    )
+    if period_band is None:
+        return 0.0
+
+    low_frequency_hz = sample_rate_hz / float(period_band[1])
+    high_frequency_hz = sample_rate_hz / float(period_band[0])
+    music_frequency_hz = _music_frequency_hz(
+        filtered,
+        sample_rate_hz=sample_rate_hz,
+        low_frequency_hz=low_frequency_hz,
+        high_frequency_hz=high_frequency_hz,
+    )
+    if music_frequency_hz is None:
+        return 0.0
+
+    stroke_rate_spm = music_frequency_hz * 60.0
+    if stroke_rate_spm < min_stroke_rate_spm or stroke_rate_spm > max_stroke_rate_spm:
+        return 0.0
+    return stroke_rate_spm

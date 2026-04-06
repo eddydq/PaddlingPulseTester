@@ -25,6 +25,13 @@ def _load_calculator_module():
     )
 
 
+def _load_algorithm_module(stem: str):
+    return _load_module(
+        Path(f"tests/algorithms/python_stroke_rate/{stem}.py"),
+        f"stroke_rate_algorithm_{stem}",
+    )
+
+
 def _load_logger_module():
     return _load_module(
         Path("tests/scripts/polar_logger.py"),
@@ -37,6 +44,17 @@ def _load_common_module():
         Path("tests/algorithms/python_stroke_rate/common.py"),
         "stroke_rate_common",
     )
+
+
+def _snapshot_from_y(values: list[float]) -> dict[str, object]:
+    zeros = [0.0] * len(values)
+    return {
+        "series": {
+            "x": zeros,
+            "y": list(values),
+            "z": zeros,
+        }
+    }
 
 
 def _write_full_window(csv_path: Path, sample_value: int = 1) -> None:
@@ -369,6 +387,38 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
                         grid_size=grid_size,
                     )
                 )
+
+    def test_consensus_music_estimator_returns_zero_for_short_window(self):
+        common = _load_common_module()
+
+        self.assertEqual(common.estimate_consensus_music_stroke_rate([0.0] * 32), 0.0)
+
+    def test_consensus_music_estimator_returns_in_range_value(self):
+        common = _load_common_module()
+
+        estimate = common.estimate_consensus_music_stroke_rate(
+            _sinusoid_window(61.5, harmonic=0.10)
+        )
+
+        self.assertGreater(estimate, 20.0)
+        self.assertLess(estimate, 120.0)
+        self.assertAlmostEqual(estimate, 61.5, delta=1.0)
+
+    def test_consensus_music_y_calculate_reads_y_axis_snapshot(self):
+        algorithm = _load_algorithm_module("consensus_music_y")
+
+        estimate = algorithm.calculate(
+            _snapshot_from_y(_sinusoid_window(61.5, harmonic=0.10))
+        )
+
+        self.assertAlmostEqual(estimate, 61.5, delta=1.0)
+
+    def test_discover_python_algorithms_includes_consensus_music_y(self):
+        calculator = _load_calculator_module()
+
+        names = {algorithm.name for algorithm in calculator.discover_python_algorithms()}
+
+        self.assertIn("consensus_music_y", names)
 
 
 if __name__ == "__main__":
