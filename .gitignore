@@ -11,3 +11,4 @@ __pycache__/
 /tests/results/png/*
 !/tests/results/png/.gitkeep
 /tests/algorithms/c_stroke_rate/*.exe
+/tests/.tmp_test_artifacts/
