@@ -23,6 +23,13 @@ def _load_calculator_module():
     )
 
 
+def _load_logger_module():
+    return _load_module(
+        Path("tests/scripts/polar_logger.py"),
+        "polar_logger",
+    )
+
+
 def _write_full_window(csv_path: Path, sample_value: int = 1) -> None:
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
@@ -54,6 +61,10 @@ def _temporary_root(name: str):
 
 
 class CalculateStrokeRateWorkflowTest(unittest.TestCase):
+    def test_logger_defaults_to_tests_raw_logs(self):
+        logger_module = _load_logger_module()
+        self.assertEqual(logger_module.LOGS_DIR, Path("tests/logs/raw_logs").resolve())
+
     def test_process_all_logs_writes_one_csv_and_one_png_per_raw_log(self):
         module = _load_calculator_module()
         with _temporary_root("process_all_logs") as root:
@@ -103,6 +114,31 @@ class CalculateStrokeRateWorkflowTest(unittest.TestCase):
                 self.assertIn("autocorrelation_y", reader.fieldnames)
                 self.assertIn("autocorrelation_z", reader.fieldnames)
                 self.assertIn("autocorrelation_magnitude", reader.fieldnames)
+
+    def test_generated_csv_includes_firmware_exact_column(self):
+        module = _load_calculator_module()
+        with _temporary_root("firmware_exact") as root:
+            raw_logs_dir = root / "logs" / "raw_logs"
+            stroke_rate_logs_dir = root / "logs" / "stroke_rate_logs"
+            png_dir = root / "results" / "png"
+            raw_logs_dir.mkdir(parents=True)
+
+            _write_full_window(raw_logs_dir / "polar_log_001.csv", sample_value=7)
+
+            module.process_all_logs(
+                raw_logs_dir=raw_logs_dir,
+                stroke_rate_logs_dir=stroke_rate_logs_dir,
+                png_dir=png_dir,
+                firmware_exact_source=Path("tests/algorithms/c_stroke_rate/stroke_rate_firmware_exact.c"),
+            )
+
+            with (stroke_rate_logs_dir / "polar_log_001.csv").open(
+                "r",
+                newline="",
+                encoding="utf-8",
+            ) as handle:
+                reader = csv.DictReader(handle)
+                self.assertIn("firmware_exact_z", reader.fieldnames)
 
 
 if __name__ == "__main__":
