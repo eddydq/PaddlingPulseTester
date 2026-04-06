@@ -228,6 +228,24 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
 
         self.assertEqual(common._zero_phase_bandpass([1.0] * 26), [])
 
+    def test_yin_period_candidate_tracks_known_rate(self):
+        common = _load_common_module()
+        filtered = common._zero_phase_bandpass(_sinusoid_window(60.0, harmonic=0.20))
+
+        period = common._yin_period_candidate(filtered)
+
+        self.assertIsNotNone(period)
+        self.assertAlmostEqual(period, 52, delta=2)
+
+    def test_cepstrum_period_candidate_tracks_known_rate(self):
+        common = _load_common_module()
+        filtered = common._zero_phase_bandpass(_sinusoid_window(78.0, harmonic=0.35))
+
+        period = common._cepstrum_period_candidate(filtered)
+
+        self.assertIsNotNone(period)
+        self.assertAlmostEqual(period, 40, delta=2)
+
 
 if __name__ == "__main__":
     unittest.main()

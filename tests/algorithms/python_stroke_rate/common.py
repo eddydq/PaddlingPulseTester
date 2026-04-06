@@ -9,6 +9,8 @@ MAX_STROKE_RATE_SPM = 120.0
 PEAK_SCORE_FRACTION = 0.8
 BUTTERWORTH_ORDER = 4
 FILTER_MARGIN_HZ = 0.10
+YIN_THRESHOLD = 0.15
+NUMERICAL_EPSILON = 1e-12
 
 
 def _stroke_rate_bounds_hz(
@@ -74,6 +76,77 @@ def _zero_phase_bandpass(
     if len(centered) <= padlen:
         return []
     return filtfilt(b_coefficients, a_coefficients, centered).tolist()
+
+
+def _yin_period_candidate(
+    values: list[float],
+    *,
+    sample_rate_hz: float = SAMPLE_RATE_HZ,
+    min_stroke_rate_spm: float = MIN_STROKE_RATE_SPM,
+    max_stroke_rate_spm: float = MAX_STROKE_RATE_SPM,
+    threshold: float = YIN_THRESHOLD,
+) -> int | None:
+    if len(values) < 2:
+        return None
+
+    min_lag, max_lag = _stroke_rate_lag_bounds(
+        len(values),
+        sample_rate_hz=sample_rate_hz,
+        min_stroke_rate_spm=min_stroke_rate_spm,
+        max_stroke_rate_spm=max_stroke_rate_spm,
+    )
+    import numpy as np
+
+    samples = np.asarray(values, dtype=float)
+    difference = np.zeros(max_lag + 1, dtype=float)
+
+    for lag in range(1, max_lag + 1):
+        delta = samples[:-lag] - samples[lag:]
+        difference[lag] = float(np.dot(delta, delta))
+
+    cmndf = np.ones(max_lag + 1, dtype=float)
+    running_sum = 0.0
+    for lag in range(1, max_lag + 1):
+        running_sum += difference[lag]
+        cmndf[lag] = difference[lag] * lag / max(running_sum, NUMERICAL_EPSILON)
+
+    for lag in range(max(min_lag, 2), max_lag):
+        if (
+            cmndf[lag] < threshold
+            and cmndf[lag] <= cmndf[lag - 1]
+            and cmndf[lag] <= cmndf[lag + 1]
+        ):
+            return lag
+
+    best_lag = min(range(min_lag, max_lag + 1), key=lambda lag_value: cmndf[lag_value])
+    return int(best_lag)
+
+
+def _cepstrum_period_candidate(
+    values: list[float],
+    *,
+    sample_rate_hz: float = SAMPLE_RATE_HZ,
+    min_stroke_rate_spm: float = MIN_STROKE_RATE_SPM,
+    max_stroke_rate_spm: float = MAX_STROKE_RATE_SPM,
+) -> int | None:
+    if len(values) < 2:
+        return None
+
+    min_lag, max_lag = _stroke_rate_lag_bounds(
+        len(values),
+        sample_rate_hz=sample_rate_hz,
+        min_stroke_rate_spm=min_stroke_rate_spm,
+        max_stroke_rate_spm=max_stroke_rate_spm,
+    )
+    import numpy as np
+
+    spectrum = np.fft.rfft(np.asarray(values, dtype=float))
+    log_magnitude = np.log(np.maximum(np.abs(spectrum), NUMERICAL_EPSILON))
+    cepstrum = np.fft.irfft(log_magnitude, n=len(values))
+    search = cepstrum[min_lag : max_lag + 1]
+    if search.size == 0 or not np.isfinite(search).all():
+        return None
+    return int(min_lag + int(np.argmax(search)))
 
 
 def magnitude_series(series: dict[str, list[float]]) -> list[float]:
