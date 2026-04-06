@@ -17,7 +17,8 @@ CONSENSUS_TOLERANCE_FRACTION = 0.05
 CONSENSUS_MARGIN_SAMPLES = 2
 MUSIC_GRID_SIZE = 4096
 MUSIC_SNAPSHOT_LENGTH = 96
-MUSIC_MIN_PEAK_PROMINENCE_RATIO = 4.0
+MUSIC_MIN_PEAK_PROMINENCE_RATIO = 1.5
+MUSIC_SINGLE_CANDIDATE_MIN_PEAK_PROMINENCE_RATIO = 4.0
 
 _NUMPY_MODULE = None
 _SCIPY_SIGNAL_MODULE = None
@@ -229,6 +230,7 @@ def _music_frequency_hz(
     sample_rate_hz: float,
     low_frequency_hz: float,
     high_frequency_hz: float,
+    min_peak_prominence_ratio: float = MUSIC_MIN_PEAK_PROMINENCE_RATIO,
     grid_size: int = MUSIC_GRID_SIZE,
 ) -> float | None:
     np = _get_numpy()
@@ -241,9 +243,11 @@ def _music_frequency_hz(
         or not math.isfinite(sample_rate_hz)
         or not math.isfinite(low_frequency_hz)
         or not math.isfinite(high_frequency_hz)
+        or not math.isfinite(min_peak_prominence_ratio)
         or sample_rate_hz <= 0.0
         or low_frequency_hz <= 0.0
         or high_frequency_hz <= low_frequency_hz
+        or min_peak_prominence_ratio <= 0.0
         or grid_size <= 0
     ):
         return None
@@ -280,7 +284,7 @@ def _music_frequency_hz(
     median = float(np.median(pseudospectrum))
     if median <= 0.0 or (
         peak / max(median, NUMERICAL_EPSILON)
-    ) < MUSIC_MIN_PEAK_PROMINENCE_RATIO:
+    ) < min_peak_prominence_ratio:
         return None
 
     return float(frequency_grid_hz[int(np.argmax(pseudospectrum))])
@@ -440,6 +444,11 @@ def estimate_consensus_music_stroke_rate(
         )
     except (OverflowError, TypeError, ValueError):
         return 0.0
+    candidate_count = sum(
+        1
+        for period in (yin_period, cepstrum_period)
+        if period is not None and min_lag <= period <= max_lag
+    )
     period_band = _consensus_period_band(
         yin_period,
         cepstrum_period,
@@ -457,6 +466,11 @@ def estimate_consensus_music_stroke_rate(
             sample_rate_hz=sample_rate_hz,
             low_frequency_hz=low_frequency_hz,
             high_frequency_hz=high_frequency_hz,
+            min_peak_prominence_ratio=(
+                MUSIC_SINGLE_CANDIDATE_MIN_PEAK_PROMINENCE_RATIO
+                if candidate_count == 1
+                else MUSIC_MIN_PEAK_PROMINENCE_RATIO
+            ),
         )
     except Exception:
         return 0.0

@@ -476,6 +476,16 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
         self.assertLess(estimate, 120.0)
         self.assertAlmostEqual(estimate, 61.5, delta=1.0)
 
+    def test_consensus_music_estimator_tracks_low_end_valid_rates(self):
+        common = _load_common_module()
+
+        for stroke_rate_spm in (24.0, 28.0, 34.0):
+            with self.subTest(stroke_rate_spm=stroke_rate_spm):
+                estimate = common.estimate_consensus_music_stroke_rate(
+                    _sinusoid_window(stroke_rate_spm, harmonic=0.10)
+                )
+                self.assertAlmostEqual(estimate, stroke_rate_spm, delta=1.0)
+
     def test_consensus_music_estimator_returns_zero_for_seeded_noise_window(self):
         common = _load_common_module()
 
