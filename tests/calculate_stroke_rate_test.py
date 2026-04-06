@@ -484,6 +484,22 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
             0.0,
         )
 
+    def test_consensus_music_estimator_returns_zero_for_known_bad_noise_seed_29(self):
+        common = _load_common_module()
+
+        self.assertEqual(
+            common.estimate_consensus_music_stroke_rate(_seeded_noise_window(29)),
+            0.0,
+        )
+
+    def test_consensus_music_estimator_returns_zero_for_known_bad_noise_seed_46(self):
+        common = _load_common_module()
+
+        self.assertEqual(
+            common.estimate_consensus_music_stroke_rate(_seeded_noise_window(46)),
+            0.0,
+        )
+
     def test_consensus_music_estimator_returns_zero_for_ramp_window(self):
         common = _load_common_module()
 
