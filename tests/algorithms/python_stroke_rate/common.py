@@ -430,14 +430,17 @@ def estimate_consensus_music_stroke_rate(
     if period_band is None:
         return 0.0
 
-    low_frequency_hz = sample_rate_hz / float(period_band[1])
-    high_frequency_hz = sample_rate_hz / float(period_band[0])
-    music_frequency_hz = _music_frequency_hz(
-        filtered,
-        sample_rate_hz=sample_rate_hz,
-        low_frequency_hz=low_frequency_hz,
-        high_frequency_hz=high_frequency_hz,
-    )
+    try:
+        low_frequency_hz = sample_rate_hz / float(period_band[1])
+        high_frequency_hz = sample_rate_hz / float(period_band[0])
+        music_frequency_hz = _music_frequency_hz(
+            filtered,
+            sample_rate_hz=sample_rate_hz,
+            low_frequency_hz=low_frequency_hz,
+            high_frequency_hz=high_frequency_hz,
+        )
+    except Exception:
+        return 0.0
     if music_frequency_hz is None:
         return 0.0
 

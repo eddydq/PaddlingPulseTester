@@ -91,6 +91,21 @@ def _temporary_root(name: str):
 
 
 @contextmanager
+def _temporarily_unload_modules(*module_names: str):
+    original_modules = {
+        module_name: sys.modules.pop(module_name, None) for module_name in module_names
+    }
+    try:
+        yield
+    finally:
+        for module_name, module in original_modules.items():
+            if module is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = module
+
+
+@contextmanager
 def _without_algorithm_import_side_effects():
     algorithms_dir = Path("tests/algorithms/python_stroke_rate")
     algorithm_paths = {
@@ -98,17 +113,22 @@ def _without_algorithm_import_side_effects():
         str(algorithms_dir.resolve()),
     }
     original_sys_path = list(sys.path)
-    cached_common = sys.modules.pop("common", None)
-    cached_algorithm = sys.modules.pop("stroke_rate_algorithm_consensus_music_y", None)
+    original_modules = {
+        "common": sys.modules.pop("common", None),
+        "stroke_rate_algorithm_consensus_music_y": sys.modules.pop(
+            "stroke_rate_algorithm_consensus_music_y", None
+        ),
+    }
     sys.path[:] = [entry for entry in sys.path if entry not in algorithm_paths]
     try:
         yield
     finally:
         sys.path[:] = original_sys_path
-        if cached_common is not None:
-            sys.modules["common"] = cached_common
-        if cached_algorithm is not None:
-            sys.modules["stroke_rate_algorithm_consensus_music_y"] = cached_algorithm
+        for module_name, module in original_modules.items():
+            if module is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = module
 
 
 def _sinusoid_window(
@@ -225,6 +245,7 @@ class CalculateStrokeRateWorkflowTest(unittest.TestCase):
                 self.assertIn("autocorrelation_y", reader.fieldnames)
                 self.assertIn("autocorrelation_z", reader.fieldnames)
                 self.assertIn("autocorrelation_magnitude", reader.fieldnames)
+                self.assertIn("consensus_music_y", reader.fieldnames)
 
     def test_generated_csv_includes_firmware_exact_column(self):
         module = _load_calculator_module()
@@ -446,13 +467,35 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
                     0.0,
                 )
 
-    def test_consensus_music_y_calculate_reads_y_axis_snapshot(self):
-        with _without_algorithm_import_side_effects():
-            algorithm = _load_algorithm_module("consensus_music_y")
+    def test_consensus_music_estimator_returns_zero_if_music_stage_raises(self):
+        common = _load_common_module()
+        original_music_frequency_hz = common._music_frequency_hz
 
-            estimate = algorithm.calculate(
-                _snapshot_from_y(_sinusoid_window(61.5, harmonic=0.10))
+        def raising_music_frequency_hz(*_args, **_kwargs):
+            raise RuntimeError("unexpected music failure")
+
+        try:
+            common._music_frequency_hz = raising_music_frequency_hz
+            self.assertEqual(
+                common.estimate_consensus_music_stroke_rate(
+                    _sinusoid_window(61.5, harmonic=0.10)
+                ),
+                0.0,
             )
+        finally:
+            common._music_frequency_hz = original_music_frequency_hz
+
+    def test_consensus_music_y_calculate_reads_y_axis_snapshot(self):
+        with _temporarily_unload_modules("common", "stroke_rate_algorithm_consensus_music_y"):
+            with _without_algorithm_import_side_effects():
+                algorithm = _load_algorithm_module("consensus_music_y")
+
+                estimate = algorithm.calculate(
+                    _snapshot_from_y(_sinusoid_window(61.5, harmonic=0.10))
+                )
+
+            self.assertNotIn("common", sys.modules)
+            self.assertNotIn("stroke_rate_algorithm_consensus_music_y", sys.modules)
 
         self.assertAlmostEqual(estimate, 61.5, delta=1.0)
 
