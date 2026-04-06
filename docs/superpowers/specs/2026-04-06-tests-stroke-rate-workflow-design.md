@@ -51,7 +51,7 @@ The current on-disk `tests/` directory is empty, so this layout can be introduce
    Each Python estimator lives in its own file. The initial split mirrors the existing reference logic with separate modules for `autocorrelation_x`, `autocorrelation_y`, `autocorrelation_z`, and `autocorrelation_magnitude`. Each module exposes one stable algorithm name and one calculation entrypoint so `calculate_stroke_rate.py` can discover and run them consistently.
 
 4. `tests/algorithms/c_stroke_rate/stroke_rate_firmware_exact.c`
-   A copied C implementation of the firmware-exact estimator. `calculate_stroke_rate.py` builds or reuses its host executable from the `tests/algorithms/c_stroke_rate` location and records its returned stroke-rate values as another algorithm column in the generated CSVs.
+   A copied C implementation of the firmware-exact estimator. `calculate_stroke_rate.py` builds or reuses its host executable from the `tests/algorithms/c_stroke_rate` location, starts it as a subprocess, streams one full sample window per input row over `stdin`, reads one returned stroke-rate value per row from `stdout`, and records that value as another algorithm column in the generated CSVs.
 
 **Data Flow**
 
@@ -63,6 +63,11 @@ The current on-disk `tests/` directory is empty, so this layout can be introduce
   - Run every enabled algorithm under `tests/algorithms`.
   - Build one output row containing `timestamp`, `row_index`, `count`, and one column per algorithm.
   - Append that row to `tests/logs/stroke_rate_logs/<raw-log-stem>.csv`.
+- For the firmware-exact C estimator:
+  - Check whether a host executable already exists beside the copied C source.
+  - Rebuild it when the executable is missing or older than the source file.
+  - Launch one subprocess per raw log so state can persist across successive rows from the same file.
+  - Send one ordered sample window to the subprocess over `stdin` and read one stroke-rate result back from `stdout`.
 - After the stroke-rate CSV is complete for that raw log:
   - Parse the generated stroke-rate CSV.
   - Plot every algorithm column against `timestamp`.
@@ -105,6 +110,7 @@ The stroke-rate CSV schema is:
 - If no raw logs are present, print a clear message and exit successfully.
 - If an input row is malformed or incomplete, skip that row or raise a clear parsing error depending on whether the problem is a normal partial window or a broken CSV structure.
 - If the firmware-exact C executable is missing and cannot be built, raise a clear runtime error instead of emitting incomplete output silently.
+- If the C subprocess returns malformed output or exits unexpectedly, stop processing that log and raise a clear runtime error.
 - Each raw log is processed independently so one bad file does not corrupt the outputs of other logs.
 
 **Testing**
