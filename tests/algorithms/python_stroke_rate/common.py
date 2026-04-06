@@ -2,11 +2,75 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+from scipy.signal import butter, filtfilt
+
 SAMPLE_STORE_CAPACITY = 512
 SAMPLE_RATE_HZ = 52.0
 MIN_STROKE_RATE_SPM = 20.0
 MAX_STROKE_RATE_SPM = 120.0
 PEAK_SCORE_FRACTION = 0.8
+BUTTERWORTH_ORDER = 4
+FILTER_MARGIN_HZ = 0.10
+
+
+def _stroke_rate_bounds_hz(
+    *,
+    sample_rate_hz: float = SAMPLE_RATE_HZ,
+    min_stroke_rate_spm: float = MIN_STROKE_RATE_SPM,
+    max_stroke_rate_spm: float = MAX_STROKE_RATE_SPM,
+) -> tuple[float, float]:
+    if sample_rate_hz <= 0.0:
+        raise ValueError("sample_rate_hz must be positive")
+
+    nyquist_hz = sample_rate_hz / 2.0
+    low_hz = max(0.01, (min_stroke_rate_spm / 60.0) - FILTER_MARGIN_HZ)
+    high_hz = min((max_stroke_rate_spm / 60.0) + FILTER_MARGIN_HZ, nyquist_hz * 0.95)
+    if low_hz >= high_hz:
+        raise ValueError("invalid filter passband")
+    return low_hz, high_hz
+
+
+def _stroke_rate_lag_bounds(
+    sample_count: int,
+    *,
+    sample_rate_hz: float = SAMPLE_RATE_HZ,
+    min_stroke_rate_spm: float = MIN_STROKE_RATE_SPM,
+    max_stroke_rate_spm: float = MAX_STROKE_RATE_SPM,
+) -> tuple[int, int]:
+    lag_min = max(1, math.ceil((sample_rate_hz * 60.0) / max_stroke_rate_spm))
+    lag_max = min(
+        sample_count - 1,
+        math.floor((sample_rate_hz * 60.0) / min_stroke_rate_spm),
+    )
+    if lag_min > lag_max:
+        raise ValueError("invalid lag bounds")
+    return lag_min, lag_max
+
+
+def _zero_phase_bandpass(
+    values: list[float],
+    *,
+    sample_rate_hz: float = SAMPLE_RATE_HZ,
+    min_stroke_rate_spm: float = MIN_STROKE_RATE_SPM,
+    max_stroke_rate_spm: float = MAX_STROKE_RATE_SPM,
+) -> list[float]:
+    if len(values) < 8 or sample_rate_hz <= 0.0:
+        return []
+
+    low_hz, high_hz = _stroke_rate_bounds_hz(
+        sample_rate_hz=sample_rate_hz,
+        min_stroke_rate_spm=min_stroke_rate_spm,
+        max_stroke_rate_spm=max_stroke_rate_spm,
+    )
+    centered = np.asarray(values, dtype=float) - float(np.mean(values))
+    b_coefficients, a_coefficients = butter(
+        BUTTERWORTH_ORDER,
+        [low_hz, high_hz],
+        btype="bandpass",
+        fs=sample_rate_hz,
+    )
+    return filtfilt(b_coefficients, a_coefficients, centered).tolist()
 
 
 def magnitude_series(series: dict[str, list[float]]) -> list[float]:
