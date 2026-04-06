@@ -554,6 +554,36 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
         finally:
             common._music_frequency_hz = original_music_frequency_hz
 
+    def test_consensus_music_estimator_returns_zero_when_yin_candidate_is_missing(self):
+        common = _load_common_module()
+        original_yin_period_candidate = common._yin_period_candidate
+
+        try:
+            common._yin_period_candidate = lambda *_args, **_kwargs: None
+            self.assertEqual(
+                common.estimate_consensus_music_stroke_rate(
+                    _sinusoid_window(61.5, harmonic=0.10)
+                ),
+                0.0,
+            )
+        finally:
+            common._yin_period_candidate = original_yin_period_candidate
+
+    def test_consensus_music_estimator_returns_zero_when_cepstrum_candidate_is_missing(self):
+        common = _load_common_module()
+        original_cepstrum_period_candidate = common._cepstrum_period_candidate
+
+        try:
+            common._cepstrum_period_candidate = lambda *_args, **_kwargs: None
+            self.assertEqual(
+                common.estimate_consensus_music_stroke_rate(
+                    _sinusoid_window(61.5, harmonic=0.10)
+                ),
+                0.0,
+            )
+        finally:
+            common._cepstrum_period_candidate = original_cepstrum_period_candidate
+
     def test_consensus_music_y_calculate_reads_y_axis_snapshot(self):
         with _temporarily_unload_modules("common", "stroke_rate_algorithm_consensus_music_y"):
             with _without_algorithm_import_side_effects():

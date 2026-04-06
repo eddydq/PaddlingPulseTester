@@ -18,7 +18,6 @@ CONSENSUS_MARGIN_SAMPLES = 2
 MUSIC_GRID_SIZE = 4096
 MUSIC_SNAPSHOT_LENGTH = 96
 MUSIC_MIN_PEAK_PROMINENCE_RATIO = 1.5
-MUSIC_SINGLE_CANDIDATE_MIN_PEAK_PROMINENCE_RATIO = 4.0
 
 _NUMPY_MODULE = None
 _SCIPY_SIGNAL_MODULE = None
@@ -444,11 +443,9 @@ def estimate_consensus_music_stroke_rate(
         )
     except (OverflowError, TypeError, ValueError):
         return 0.0
-    candidate_count = sum(
-        1
-        for period in (yin_period, cepstrum_period)
-        if period is not None and min_lag <= period <= max_lag
-    )
+    if yin_period is None or cepstrum_period is None:
+        return 0.0
+
     period_band = _consensus_period_band(
         yin_period,
         cepstrum_period,
@@ -466,11 +463,6 @@ def estimate_consensus_music_stroke_rate(
             sample_rate_hz=sample_rate_hz,
             low_frequency_hz=low_frequency_hz,
             high_frequency_hz=high_frequency_hz,
-            min_peak_prominence_ratio=(
-                MUSIC_SINGLE_CANDIDATE_MIN_PEAK_PROMINENCE_RATIO
-                if candidate_count == 1
-                else MUSIC_MIN_PEAK_PROMINENCE_RATIO
-            ),
         )
     except Exception:
         return 0.0
