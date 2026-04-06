@@ -3,5 +3,11 @@ config/local.mk
 config/local/
 .claude/
 .worktrees/
-tests/
 __pycache__/
+/tests/logs/raw_logs/*
+!/tests/logs/raw_logs/.gitkeep
+/tests/logs/stroke_rate_logs/*
+!/tests/logs/stroke_rate_logs/.gitkeep
+/tests/results/png/*
+!/tests/results/png/.gitkeep
+/tests/algorithms/c_stroke_rate/*.exe
