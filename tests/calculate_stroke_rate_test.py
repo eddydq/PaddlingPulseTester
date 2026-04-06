@@ -297,7 +297,36 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
 
         refined_spm = refined_frequency_hz * 60.0
         coarse_spm = (52.0 * 60.0) / 54.0
+        self.assertAlmostEqual(refined_spm, expected_spm, delta=0.1)
         self.assertLess(abs(refined_spm - expected_spm), abs(coarse_spm - expected_spm))
+
+    def test_music_frequency_returns_none_for_flat_window(self):
+        common = _load_common_module()
+
+        self.assertIsNone(
+            common._music_frequency_hz(
+                [0.0] * 512,
+                sample_rate_hz=52.0,
+                low_frequency_hz=52.0 / 56.0,
+                high_frequency_hz=52.0 / 51.0,
+            )
+        )
+
+    def test_music_frequency_returns_none_for_seeded_noise_window(self):
+        common = _load_common_module()
+        rng = np.random.default_rng(12345)
+        filtered_noise = common._zero_phase_bandpass(
+            rng.normal(0.0, 1.0, 512).tolist()
+        )
+
+        self.assertIsNone(
+            common._music_frequency_hz(
+                filtered_noise,
+                sample_rate_hz=52.0,
+                low_frequency_hz=52.0 / 56.0,
+                high_frequency_hz=52.0 / 51.0,
+            )
+        )
 
     def test_music_frequency_returns_none_for_non_finite_numeric_parameters(self):
         common = _load_common_module()

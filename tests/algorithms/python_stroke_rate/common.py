@@ -15,6 +15,7 @@ CONSENSUS_TOLERANCE_FRACTION = 0.05
 CONSENSUS_MARGIN_SAMPLES = 2
 MUSIC_GRID_SIZE = 4096
 MUSIC_SNAPSHOT_LENGTH = 96
+MUSIC_MIN_PEAK_PROMINENCE_RATIO = 2.0
 
 
 def _stroke_rate_bounds_hz(
@@ -212,6 +213,8 @@ def _music_frequency_hz(
     samples = np.asarray(values, dtype=float)
     if (
         samples.size < 32
+        or not np.isfinite(samples).all()
+        or float(np.ptp(samples)) <= NUMERICAL_EPSILON
         or not math.isfinite(sample_rate_hz)
         or not math.isfinite(low_frequency_hz)
         or not math.isfinite(high_frequency_hz)
@@ -250,6 +253,16 @@ def _music_frequency_hz(
         projection = noise_subspace.conj().T @ steering
         denominator = float(np.vdot(projection, projection).real)
         pseudospectrum[grid_index] = 1.0 / max(denominator, NUMERICAL_EPSILON)
+
+    if not np.isfinite(pseudospectrum).all():
+        return None
+
+    peak = float(np.max(pseudospectrum))
+    median = float(np.median(pseudospectrum))
+    if median <= 0.0 or (
+        peak / max(median, NUMERICAL_EPSILON)
+    ) < MUSIC_MIN_PEAK_PROMINENCE_RATIO:
+        return None
 
     return float(frequency_grid_hz[int(np.argmax(pseudospectrum))])
 
