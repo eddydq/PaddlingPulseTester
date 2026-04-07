@@ -23,7 +23,7 @@ from matplotlib import pyplot as plt
 SAMPLE_STORE_CAPACITY = 512
 AXES = ("x", "y", "z")
 METADATA_COLUMNS = {"timestamp", "row_index", "count"}
-REFERENCE_ALGORITHM = "consensus_music_magnitude"
+REFERENCE_ALGORITHM = "consensus_music_y"
 
 PLOT_GROUPS = [
     {
@@ -53,7 +53,7 @@ PLOT_GROUPS = [
         "title": "Heavy + Smoothed",
         "algorithms": [
             "hilbert_instantaneous_magnitude", "wavelet_dwt_magnitude",
-            "consensus_music_magnitude",
+            "consensus_music_y",
             "kalman2d_peak_hysteresis_magnitude", "kalman2d_fft_dominant_magnitude",
             "firmware_exact_z",
         ],
