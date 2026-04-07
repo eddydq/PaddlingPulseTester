@@ -223,6 +223,19 @@ def _consensus_period_band(
     return (lower, upper)
 
 
+def _consensus_period_band_is_too_wide(period_band: tuple[int, int]) -> bool:
+    lower, upper = period_band
+    if lower <= 0 or upper < lower:
+        return True
+
+    band_width = upper - lower
+    width_limit = max(
+        (CONSENSUS_MARGIN_SAMPLES * 2) + 2,
+        math.ceil(lower * CONSENSUS_TOLERANCE_FRACTION * 2.0),
+    )
+    return band_width > width_limit
+
+
 def _music_frequency_hz(
     values: list[float],
     *,
@@ -381,6 +394,105 @@ def estimate_autocorrelation_stroke_rate(
     return (sample_rate_hz * 60.0) / best_lag
 
 
+def _autocorrelation_period_candidate(
+    values: list[float],
+    *,
+    sample_rate_hz: float = SAMPLE_RATE_HZ,
+    min_stroke_rate_spm: float = MIN_STROKE_RATE_SPM,
+    max_stroke_rate_spm: float = MAX_STROKE_RATE_SPM,
+) -> int | None:
+    if len(values) < 2:
+        return None
+
+    try:
+        min_lag, max_lag = _stroke_rate_lag_bounds(
+            len(values),
+            sample_rate_hz=sample_rate_hz,
+            min_stroke_rate_spm=min_stroke_rate_spm,
+            max_stroke_rate_spm=max_stroke_rate_spm,
+        )
+    except ValueError:
+        return None
+
+    scores = [
+        (lag, _pearson_autocorrelation(values, lag))
+        for lag in range(min_lag, max_lag + 1)
+    ]
+    best_lag = _select_peak_lag(scores)
+    best_score = next((s for l, s in scores if l == best_lag), 0.0)
+    if best_lag == 0 or best_score <= 0.0:
+        return None
+    return best_lag
+
+
+def _multi_candidate_consensus_period(
+    candidates: list[int | None],
+    *,
+    min_lag: int,
+    max_lag: int,
+    tolerance_fraction: float = CONSENSUS_TOLERANCE_FRACTION,
+) -> tuple[int, int] | None:
+    valid = [c for c in candidates if c is not None and min_lag <= c <= max_lag]
+    if not valid:
+        return None
+    if len(valid) == 1:
+        period = valid[0]
+        return (
+            max(min_lag, period - CONSENSUS_MARGIN_SAMPLES),
+            min(max_lag, period + CONSENSUS_MARGIN_SAMPLES),
+        )
+
+    lower = min(valid)
+    upper = max(valid)
+    tolerance_samples = max(1, math.ceil(lower * tolerance_fraction))
+    if upper - lower <= tolerance_samples:
+        return (
+            max(min_lag, lower - CONSENSUS_MARGIN_SAMPLES),
+            min(max_lag, upper + CONSENSUS_MARGIN_SAMPLES),
+        )
+    median_period = sorted(valid)[len(valid) // 2]
+    return (
+        max(min_lag, median_period - CONSENSUS_MARGIN_SAMPLES),
+        min(max_lag, median_period + CONSENSUS_MARGIN_SAMPLES),
+    )
+
+
+def _music_full_band_frequency_hz(
+    filtered: list[float],
+    *,
+    sample_rate_hz: float,
+    min_stroke_rate_spm: float,
+    max_stroke_rate_spm: float,
+) -> float | None:
+    low_hz = min_stroke_rate_spm / 60.0
+    high_hz = max_stroke_rate_spm / 60.0
+    return _music_frequency_hz(
+        filtered,
+        sample_rate_hz=sample_rate_hz,
+        low_frequency_hz=low_hz,
+        high_frequency_hz=high_hz,
+        min_peak_prominence_ratio=1.2,
+    )
+
+
+def _reject_subharmonic(
+    music_spm: float,
+    candidate_spm: float | None,
+    *,
+    min_stroke_rate_spm: float,
+    max_stroke_rate_spm: float,
+) -> float:
+    if candidate_spm is None or candidate_spm <= 0.0:
+        return music_spm
+
+    ratio = candidate_spm / music_spm if music_spm > 0.0 else 0.0
+    if 1.8 <= ratio <= 2.2:
+        doubled = music_spm * 2.0
+        if min_stroke_rate_spm <= doubled <= max_stroke_rate_spm:
+            return doubled
+    return music_spm
+
+
 def estimate_consensus_music_stroke_rate(
     values: list[float],
     *,
@@ -443,7 +555,12 @@ def estimate_consensus_music_stroke_rate(
         )
     except (OverflowError, TypeError, ValueError):
         return 0.0
+
     if yin_period is None or cepstrum_period is None:
+        return 0.0
+
+    coarse_spm = (sample_rate_hz * 60.0) / float(yin_period)
+    if coarse_spm < min_stroke_rate_spm or coarse_spm > max_stroke_rate_spm:
         return 0.0
 
     period_band = _consensus_period_band(
@@ -454,6 +571,8 @@ def estimate_consensus_music_stroke_rate(
     )
     if period_band is None:
         return 0.0
+    if _consensus_period_band_is_too_wide(period_band):
+        return coarse_spm
 
     try:
         low_frequency_hz = sample_rate_hz / float(period_band[1])
@@ -465,11 +584,11 @@ def estimate_consensus_music_stroke_rate(
             high_frequency_hz=high_frequency_hz,
         )
     except Exception:
-        return 0.0
+        return coarse_spm
     if music_frequency_hz is None:
-        return 0.0
+        return coarse_spm
 
     stroke_rate_spm = music_frequency_hz * 60.0
     if stroke_rate_spm < min_stroke_rate_spm or stroke_rate_spm > max_stroke_rate_spm:
-        return 0.0
+        return coarse_spm
     return stroke_rate_spm

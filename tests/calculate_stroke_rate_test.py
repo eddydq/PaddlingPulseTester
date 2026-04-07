@@ -261,6 +261,7 @@ class CalculateStrokeRateWorkflowTest(unittest.TestCase):
                 self.assertIn("autocorrelation_z", reader.fieldnames)
                 self.assertIn("autocorrelation_magnitude", reader.fieldnames)
                 self.assertIn("consensus_music_y", reader.fieldnames)
+                self.assertNotIn("consensus_music_magnitude", reader.fieldnames)
 
     def test_generated_csv_includes_firmware_exact_column(self):
         module = _load_calculator_module()
@@ -536,39 +537,6 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
                     0.0,
                 )
 
-    def test_consensus_music_estimator_returns_zero_if_music_stage_raises(self):
-        common = _load_common_module()
-        original_music_frequency_hz = common._music_frequency_hz
-
-        def raising_music_frequency_hz(*_args, **_kwargs):
-            raise RuntimeError("unexpected music failure")
-
-        try:
-            common._music_frequency_hz = raising_music_frequency_hz
-            self.assertEqual(
-                common.estimate_consensus_music_stroke_rate(
-                    _sinusoid_window(61.5, harmonic=0.10)
-                ),
-                0.0,
-            )
-        finally:
-            common._music_frequency_hz = original_music_frequency_hz
-
-    def test_consensus_music_estimator_returns_zero_when_yin_candidate_is_missing(self):
-        common = _load_common_module()
-        original_yin_period_candidate = common._yin_period_candidate
-
-        try:
-            common._yin_period_candidate = lambda *_args, **_kwargs: None
-            self.assertEqual(
-                common.estimate_consensus_music_stroke_rate(
-                    _sinusoid_window(61.5, harmonic=0.10)
-                ),
-                0.0,
-            )
-        finally:
-            common._yin_period_candidate = original_yin_period_candidate
-
     def test_consensus_music_estimator_returns_zero_when_cepstrum_candidate_is_missing(self):
         common = _load_common_module()
         original_cepstrum_period_candidate = common._cepstrum_period_candidate
@@ -584,6 +552,80 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
         finally:
             common._cepstrum_period_candidate = original_cepstrum_period_candidate
 
+    def test_consensus_music_estimator_falls_back_to_yin_when_music_returns_none(self):
+        common = _load_common_module()
+        original_music_frequency_hz = common._music_frequency_hz
+
+        try:
+            common._music_frequency_hz = lambda *_args, **_kwargs: None
+            estimate = common.estimate_consensus_music_stroke_rate(
+                _sinusoid_window(61.5, harmonic=0.10)
+            )
+        finally:
+            common._music_frequency_hz = original_music_frequency_hz
+
+        self.assertGreater(estimate, 0.0)
+        self.assertAlmostEqual(estimate, 61.5, delta=1.0)
+
+    def test_consensus_music_estimator_falls_back_to_yin_when_music_raises(self):
+        common = _load_common_module()
+        original_music_frequency_hz = common._music_frequency_hz
+
+        def raising_music_frequency_hz(*_args, **_kwargs):
+            raise RuntimeError("unexpected music failure")
+
+        try:
+            common._music_frequency_hz = raising_music_frequency_hz
+            estimate = common.estimate_consensus_music_stroke_rate(
+                _sinusoid_window(61.5, harmonic=0.10)
+            )
+        finally:
+            common._music_frequency_hz = original_music_frequency_hz
+
+        self.assertGreater(estimate, 0.0)
+        self.assertAlmostEqual(estimate, 61.5, delta=1.0)
+
+    def test_consensus_music_estimator_falls_back_to_yin_when_consensus_band_is_too_wide(self):
+        common = _load_common_module()
+        original_consensus_period_band = common._consensus_period_band
+        original_music_frequency_hz = common._music_frequency_hz
+
+        try:
+            common._consensus_period_band = lambda *_args, **_kwargs: (40, 80)
+            common._music_frequency_hz = lambda *_args, **_kwargs: 999.0 / 60.0
+            values = _sinusoid_window(61.5, harmonic=0.10)
+            filtered = common._zero_phase_bandpass(values)
+            yin_period = common._yin_period_candidate(filtered)
+            self.assertIsNotNone(yin_period)
+            expected = (52.0 * 60.0) / yin_period
+            estimate = common.estimate_consensus_music_stroke_rate(values)
+        finally:
+            common._consensus_period_band = original_consensus_period_band
+            common._music_frequency_hz = original_music_frequency_hz
+
+        self.assertAlmostEqual(estimate, expected, delta=0.01)
+
+    def test_consensus_music_estimator_returns_zero_when_yin_candidate_is_missing(self):
+        common = _load_common_module()
+        original_yin_period_candidate = common._yin_period_candidate
+        original_music_frequency_hz = common._music_frequency_hz
+        original_consensus_period_band = common._consensus_period_band
+
+        try:
+            common._yin_period_candidate = lambda *_args, **_kwargs: None
+            common._music_frequency_hz = lambda *_args, **_kwargs: 999.0 / 60.0
+            common._consensus_period_band = lambda *_args, **_kwargs: (40, 80)
+            self.assertEqual(
+                common.estimate_consensus_music_stroke_rate(
+                    _sinusoid_window(61.5, harmonic=0.10)
+                ),
+                0.0,
+            )
+        finally:
+            common._yin_period_candidate = original_yin_period_candidate
+            common._music_frequency_hz = original_music_frequency_hz
+            common._consensus_period_band = original_consensus_period_band
+
     def test_consensus_music_y_calculate_reads_y_axis_snapshot(self):
         with _temporarily_unload_modules("common", "stroke_rate_algorithm_consensus_music_y"):
             with _without_algorithm_import_side_effects():
@@ -598,12 +640,13 @@ class ConsensusMusicHelpersTest(unittest.TestCase):
 
         self.assertAlmostEqual(estimate, 61.5, delta=1.0)
 
-    def test_discover_python_algorithms_includes_consensus_music_y(self):
+    def test_discover_python_algorithms_includes_consensus_music_y_not_magnitude(self):
         calculator = _load_calculator_module()
 
         names = {algorithm.name for algorithm in calculator.discover_python_algorithms()}
 
         self.assertIn("consensus_music_y", names)
+        self.assertNotIn("consensus_music_magnitude", names)
 
 
 if __name__ == "__main__":
