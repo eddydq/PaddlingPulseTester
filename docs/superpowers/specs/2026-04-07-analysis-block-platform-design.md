@@ -143,7 +143,7 @@ Blocks do not measure themselves — the executor owns timing.
 | `cepstrum_period` | `series` | `primary: candidate` | `min_hz` (0.33), `max_hz` (2.0) | Real cepstrum via log-spectrum → quefrency peak |
 | `music_refine` | `series` | `primary: candidate` | `num_signals` (1), `min_hz` (0.33), `max_hz` (2.0) | MUSIC pseudo-spectrum from covariance eigendecomposition |
 | `hilbert_freq` | `series` | `primary: candidate` | — | `scipy.signal.hilbert` → instantaneous frequency → median SPM |
-| `interval_to_spm` | `candidate` | `primary: candidate` | — | Converts `data["interval"]` (seconds) to `data["spm"]` |
+| `interval_to_spm` | `candidate` | `primary: candidate` | — | Converts mean of `data["intervals"]` (list of seconds) to `data["spm"]` |
 | `crossings_to_spm` | `candidate` | `primary: candidate` | — | Converts crossing count + window length to `data["spm"]` |
 
 ### Detection (5 blocks)
@@ -153,8 +153,8 @@ Blocks do not measure themselves — the executor owns timing.
 | `adaptive_envelope` | `series` | `primary: series` | `smoothing_hz` (1.0) | `abs(scipy.signal.hilbert())` → low-pass envelope |
 | `adaptive_peak_detect` | `series` | `primary: candidate` | `min_distance_samples` (26), `prominence` (0.1) | `scipy.signal.find_peaks` → intervals → candidate |
 | `schmitt_trigger` | `series` | `primary: candidate` | `high_thresh` (required), `low_thresh` (required) | Hysteresis crossing detection → intervals. Thresholds are signal-amplitude-dependent — no sensible default, user must configure. |
-| `zero_crossing_detect` | `series` | `primary: candidate` | `dead_samples` (5) | Zero-crossing with dead zone → intervals |
-| `peak_selector` | `candidate` | `primary: candidate` | `count` (3), `strategy` ("last") | Keep last/first/best N peaks from detected intervals |
+| `zero_crossing_detect` | `series` | `primary: candidate` | `dead_samples` (5) | Zero-crossing with dead zone → crossings count + window length |
+| `peak_selector` | `candidate` | `primary: candidate` | `count` (3), `strategy` ("last") | Keep last/first N peaks from detected intervals |
 
 ### Validation (6 blocks)
 

@@ -350,15 +350,31 @@ BLOCK = HpfGravityBlock()
 git rm analysis/algorithms/pretraitement/py/highpass.py
 ```
 
-- [ ] **Step 3: Run tests**
+- [ ] **Step 3: Update any test references from highpass to hpf_gravity**
+
+Check `analysis/tests/analysis_python_blocks_test.py` and any other test files for imports or references to `highpass`. If found, update them to `hpf_gravity`. The harness test uses filesystem discovery so it will auto-discover the renamed file.
+
+- [ ] **Step 4: Write hpf_gravity test**
+
+Append to `analysis/tests/analysis_all_blocks_test.py` (create the file if Task 4 has not run yet, otherwise append):
+
+```python
+def test_hpf_gravity():
+    from analysis.algorithms.pretraitement.py.hpf_gravity import BLOCK
+    result = BLOCK.run({"source": [SERIES_PACKET]}, {"cutoff_hz": 0.5}, {})
+    assert result.outputs["primary"][0].kind == "series"
+    assert len(result.outputs["primary"][0].data["values"]) == 256
+```
+
+- [ ] **Step 5: Run tests**
 
 Run: `python -m pytest analysis/tests/ -v`
-Expected: PASS (harness test discovers hpf_gravity instead of highpass)
+Expected: PASS
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add analysis/algorithms/pretraitement/py/hpf_gravity.py
+git add analysis/algorithms/pretraitement/py/hpf_gravity.py analysis/tests/
 git commit -m "feat: rename highpass to hpf_gravity with scipy implementation"
 ```
 
@@ -1148,7 +1164,7 @@ Params: `fundamental_spm` (required), `tolerance_spm` (5.0).
 
 - [ ] **Step 6: Implement confidence_gate.py**
 
-Check `packet.confidence >= min_confidence`. Route to accepted/rejected.
+Check `packet.confidence >= min_confidence`. If `packet.confidence is None`, treat as 0.0 (reject). Route to accepted/rejected.
 
 Params: `min_confidence` (0.5).
 
