@@ -42,3 +42,40 @@ def test_hpf_gravity():
     result = BLOCK.run({"source": [SERIES_PACKET]}, {"cutoff_hz": 0.5}, {})
     assert result.outputs["primary"][0].kind == "series"
     assert len(result.outputs["primary"][0].data["values"]) == 256
+
+
+def test_lowpass():
+    from analysis.algorithms.pretraitement.py.lowpass import BLOCK
+    result = BLOCK.run({"source": [SERIES_PACKET]}, {"cutoff_hz": 5.0}, {})
+    assert result.outputs["primary"][0].kind == "series"
+    assert len(result.outputs["primary"][0].data["values"]) == 256
+
+
+def test_bandpass():
+    from analysis.algorithms.pretraitement.py.bandpass import BLOCK
+    result = BLOCK.run({"source": [SERIES_PACKET]}, {}, {})
+    assert result.outputs["primary"][0].kind == "series"
+
+
+def test_zero_phase_bandpass():
+    from analysis.algorithms.pretraitement.py.zero_phase_bandpass import BLOCK
+    result = BLOCK.run({"source": [SERIES_PACKET]}, {}, {})
+    assert result.outputs["primary"][0].kind == "series"
+
+
+def test_wavelet_isolation():
+    from analysis.algorithms.pretraitement.py.wavelet_isolation import BLOCK
+    result = BLOCK.run({"source": [SERIES_PACKET]}, {}, {})
+    assert result.outputs["primary"][0].kind == "series"
+
+
+def test_window_trim_end():
+    from analysis.algorithms.pretraitement.py.window_trim import BLOCK
+    result = BLOCK.run({"source": [SERIES_PACKET]}, {"keep_samples": 64, "anchor": "end"}, {})
+    assert len(result.outputs["primary"][0].data["values"]) == 64
+
+
+def test_window_trim_start():
+    from analysis.algorithms.pretraitement.py.window_trim import BLOCK
+    result = BLOCK.run({"source": [SERIES_PACKET]}, {"keep_samples": 64, "anchor": "start"}, {})
+    assert len(result.outputs["primary"][0].data["values"]) == 64
