@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from analysis.scripts.block_contract import BlockResult, Packet
-from analysis.scripts.block_manifest import BlockManifest
+from analysis.scripts.blocks import BlockResult, Packet
+from analysis.scripts.blocks import BlockManifest
 
 
 class SelectAxisBlock:
@@ -13,6 +13,9 @@ class SelectAxisBlock:
         input_kinds=["raw_window"],
         output_ports={"primary": "series"},
         stateful=False,
+        params_schema={
+            "axis": {"type": "str", "default": "y", "enum": ["x", "y", "z"], "description": "IMU axis to extract"},
+        },
     )
 
     def run(self, input_packets, params, state):
