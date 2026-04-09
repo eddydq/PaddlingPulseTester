@@ -57,6 +57,7 @@
 
 #define CFG_PRF_DISS
 #define CFG_PRF_CSCPS
+#define CFG_PRF_PADDLE_PIPELINE
 
 /***************************************************************************************/
 /* Profile application configuration section                                           */
