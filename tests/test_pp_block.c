@@ -73,6 +73,30 @@ static void test_block_registry(void) {
     printf("  PASS: test_block_registry\n");
 }
 
+/* Test: source stubs produce raw windows on host targets */
+static void test_source_stubs(void) {
+    uint8_t params[] = {100, 0, 12};
+    int16_t out_buf[12] = {0};
+    pp_packet_t output = { .data = out_buf, .length = 12 };
+    pp_block_result_t result = pp_block_exec(
+        PP_BLOCK_LIS3DH_SOURCE, NULL, 0, params, 3, NULL, &output, 1
+    );
+
+    assert(result.status == PP_OK);
+    assert(output.kind == PP_KIND_RAW_WINDOW);
+    assert(output.axis == PP_AXIS_ALL);
+    assert(output.sample_rate_hz == 100);
+    assert(output.length == 12);
+    assert(out_buf[0] != out_buf[3]);
+
+    output.length = 12;
+    result = pp_block_exec(PP_BLOCK_POLAR_SOURCE, NULL, 0, NULL, 0, NULL, &output, 1);
+    assert(result.status == PP_OK);
+    assert(output.kind == PP_KIND_RAW_WINDOW);
+    assert(output.sample_rate_hz == 52);
+    printf("  PASS: test_source_stubs\n");
+}
+
 /* Test: hpf_gravity removes DC offset from series */
 static void test_hpf_gravity(void) {
     int16_t series[] = {1005, 1010, 1005, 1000, 995, 990, 995, 1000};
@@ -400,6 +424,7 @@ int main(void) {
     test_select_axis_z();
     test_vector_magnitude();
     test_block_registry();
+    test_source_stubs();
     test_hpf_gravity();
     test_lowpass();
     test_autocorrelation();

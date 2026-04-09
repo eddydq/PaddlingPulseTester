@@ -2,6 +2,33 @@
 
 #include <stddef.h>
 
+extern pp_block_result_t pp_lis3dh_source_exec(
+    const pp_packet_t *inputs,
+    uint8_t num_inputs,
+    const uint8_t *params,
+    uint16_t params_len,
+    uint8_t *state,
+    pp_packet_t *outputs,
+    uint8_t num_outputs);
+
+extern pp_block_result_t pp_mpu6050_source_exec(
+    const pp_packet_t *inputs,
+    uint8_t num_inputs,
+    const uint8_t *params,
+    uint16_t params_len,
+    uint8_t *state,
+    pp_packet_t *outputs,
+    uint8_t num_outputs);
+
+extern pp_block_result_t pp_polar_source_exec(
+    const pp_packet_t *inputs,
+    uint8_t num_inputs,
+    const uint8_t *params,
+    uint16_t params_len,
+    uint8_t *state,
+    pp_packet_t *outputs,
+    uint8_t num_outputs);
+
 extern pp_block_result_t pp_select_axis_exec(
     const pp_packet_t *inputs,
     uint8_t num_inputs,
@@ -125,6 +152,42 @@ typedef struct {
 } pp_block_entry_t;
 
 static const pp_block_entry_t s_registry[] = {
+    {
+        .manifest = {
+            .block_id = PP_BLOCK_LIS3DH_SOURCE,
+            .group = 0,
+            .num_inputs = 0,
+            .num_outputs = 1,
+            .input_kinds = {0, 0, 0},
+            .output_kinds = {PP_KIND_RAW_WINDOW, 0, 0},
+            .state_size = 4
+        },
+        .exec = pp_lis3dh_source_exec
+    },
+    {
+        .manifest = {
+            .block_id = PP_BLOCK_MPU6050_SOURCE,
+            .group = 0,
+            .num_inputs = 0,
+            .num_outputs = 1,
+            .input_kinds = {0, 0, 0},
+            .output_kinds = {PP_KIND_RAW_WINDOW, 0, 0},
+            .state_size = 4
+        },
+        .exec = pp_mpu6050_source_exec
+    },
+    {
+        .manifest = {
+            .block_id = PP_BLOCK_POLAR_SOURCE,
+            .group = 0,
+            .num_inputs = 0,
+            .num_outputs = 1,
+            .input_kinds = {0, 0, 0},
+            .output_kinds = {PP_KIND_RAW_WINDOW, 0, 0},
+            .state_size = 4
+        },
+        .exec = pp_polar_source_exec
+    },
     {
         .manifest = {
             .block_id = PP_BLOCK_SELECT_AXIS,

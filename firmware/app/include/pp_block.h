@@ -71,6 +71,16 @@ typedef struct {
     uint8_t status;
 } pp_block_result_t;
 
+typedef struct {
+    uint16_t sample_rates[8];
+    uint8_t  num_rates;
+    uint8_t  resolutions[4];
+    uint8_t  num_resolutions;
+    uint8_t  axes_available[3];
+    uint8_t  num_axes;
+    uint8_t  gyro_available;
+} pp_source_caps_t;
+
 typedef pp_block_result_t (*pp_block_exec_fn)(
     const pp_packet_t *inputs,
     uint8_t            num_inputs,
@@ -93,5 +103,6 @@ pp_block_result_t pp_block_exec(
 );
 
 const pp_block_manifest_t *pp_block_get_manifest(uint8_t block_id);
+const pp_source_caps_t *pp_source_get_caps(uint8_t block_id);
 
 #endif /* PP_BLOCK_H */
