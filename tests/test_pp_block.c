@@ -188,6 +188,69 @@ static void test_fft_dominant(void) {
     printf("  PASS: test_fft_dominant (spm=%d)\n", out_buf[0]);
 }
 
+/* Test: adaptive_peak_detect estimates SPM from known peak spacing */
+static void test_adaptive_peak_detect(void) {
+    int16_t series[30] = {0};
+    pp_packet_t input;
+    uint8_t params[] = {8, 5, 0, 200};
+    int16_t out_buf[2];
+    pp_packet_t output = { .data = out_buf, .length = 2 };
+    uint8_t state[16] = {0};
+
+    series[5] = 1000;
+    series[15] = 1100;
+    series[25] = 1050;
+
+    input.data = series;
+    input.length = 30;
+    input.kind = PP_KIND_SERIES;
+    input.axis = PP_AXIS_Z;
+    input.sample_rate_hz = 10;
+
+    pp_block_result_t result = pp_block_exec(
+        PP_BLOCK_ADAPTIVE_PEAK, &input, 1, params, 4, state, &output, 1
+    );
+
+    assert(result.status == PP_OK);
+    assert(output.kind == PP_KIND_CANDIDATE);
+    assert(output.length == 2);
+    assert(out_buf[0] >= 55 && out_buf[0] <= 65);
+    assert(out_buf[1] >= 3);
+    printf("  PASS: test_adaptive_peak_detect (spm=%d peaks=%d)\n", out_buf[0], out_buf[1]);
+}
+
+/* Test: zero_crossing_detect estimates SPM from upward zero crossings */
+static void test_zero_crossing_detect(void) {
+    int16_t series[40];
+    int i;
+    pp_packet_t input;
+    uint8_t params[] = {50, 0, 5, 0};
+    int16_t out_buf[2];
+    pp_packet_t output = { .data = out_buf, .length = 2 };
+
+    for (i = 0; i < 40; i++) {
+        int phase = i % 10;
+        series[i] = (phase < 5) ? -500 : 500;
+    }
+
+    input.data = series;
+    input.length = 40;
+    input.kind = PP_KIND_SERIES;
+    input.axis = PP_AXIS_Z;
+    input.sample_rate_hz = 10;
+
+    pp_block_result_t result = pp_block_exec(
+        PP_BLOCK_ZERO_CROSSING, &input, 1, params, 4, NULL, &output, 1
+    );
+
+    assert(result.status == PP_OK);
+    assert(output.kind == PP_KIND_CANDIDATE);
+    assert(output.length == 2);
+    assert(out_buf[0] >= 55 && out_buf[0] <= 65);
+    assert(out_buf[1] >= 3);
+    printf("  PASS: test_zero_crossing_detect (spm=%d crossings=%d)\n", out_buf[0], out_buf[1]);
+}
+
 int main(void) {
     printf("test_pp_block:\n");
     test_select_axis_z();
@@ -197,6 +260,8 @@ int main(void) {
     test_lowpass();
     test_autocorrelation();
     test_fft_dominant();
+    test_adaptive_peak_detect();
+    test_zero_crossing_detect();
     printf("All tests passed.\n");
     return 0;
 }
