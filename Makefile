@@ -115,6 +115,18 @@ SOURCES := \
 	firmware/app/src/paddling_pulse_imu_lis3dh.c \
 	firmware/app/src/paddling_pulse_imu_mpu6050.c \
 	firmware/app/src/paddling_pulse_imu_polar.c \
+	firmware/app/src/pp_block.c \
+	firmware/app/src/pp_block_source.c \
+	firmware/app/src/pp_block_representation.c \
+	firmware/app/src/pp_block_pretraitement.c \
+	firmware/app/src/pp_block_estimation.c \
+	firmware/app/src/pp_block_detection.c \
+	firmware/app/src/pp_block_validation.c \
+	firmware/app/src/pp_block_suivi.c \
+	firmware/app/src/pp_protocol.c \
+	firmware/app/src/pp_graph.c \
+	firmware/app/src/pp_storage.c \
+	firmware/app/src/pp_pipeline_service.c \
 	sdk/platform/arch/boot/system_DA14531.c \
 	sdk/platform/arch/boot/startup_DA14531.c \
 	sdk/platform/arch/main/hardfault_handler.c \

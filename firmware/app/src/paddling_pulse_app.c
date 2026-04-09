@@ -53,6 +53,9 @@
 #include "paddling_pulse_imu.h"
 #include "paddling_pulse_sample_store.h"
 #include "paddling_pulse_stroke_rate.h"
+#include "pp_graph.h"
+#include "pp_pipeline_service.h"
+#include "pp_storage.h"
 #include "co_bt.h"
 #include "app_cscps.h"
 
@@ -95,6 +98,18 @@ bool csc_meas_ntf_enabled                       __SECTION_ZERO("retention_mem_ar
 bool imu_active                                 __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
 uint8_t current_cadence_rpm                     __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
 struct cscp_csc_meas csc_meas_state             __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
+
+static pp_graph_t s_pipeline_graph;
+static uint8_t s_pipeline_binary[PP_PIPELINE_MAX_BYTES];
+static uint8_t s_pipeline_ready;
+static uint8_t s_pipeline_rpm;
+static uint8_t s_node_state[PP_MAX_NODES][32];
+
+static uint8_t s_source_params[3];
+static uint8_t s_select_axis_params[1];
+static uint8_t s_hpf_params[2];
+static uint8_t s_autocorr_params[6];
+static uint8_t s_kalman_params[7];
 
 /*
  * FUNCTION DEFINITIONS
@@ -246,6 +261,137 @@ static void param_update_request_timer_cb()
     app_param_update_request_timer_used = EASY_TIMER_INVALID_TIMER;
 }
 
+static void write_u16_le(uint8_t *dst, uint16_t value)
+{
+    dst[0] = (uint8_t)(value & 0xFF);
+    dst[1] = (uint8_t)(value >> 8);
+}
+
+static uint16_t pipeline_sample_rate_hz(void)
+{
+#ifdef CFG_IMU_POLAR
+    return 52;
+#else
+    return 100;
+#endif
+}
+
+static uint8_t pipeline_axis_param(void)
+{
+#ifdef CFG_IMU_AXIS_X
+    return PP_AXIS_X;
+#elif defined(CFG_IMU_AXIS_Y)
+    return PP_AXIS_Y;
+#else
+    return PP_AXIS_Z;
+#endif
+}
+
+static uint8_t pipeline_source_block_id(void)
+{
+#ifdef CFG_IMU_LIS3DH
+    return PP_BLOCK_LIS3DH_SOURCE;
+#elif defined(CFG_IMU_MPU6050)
+    return PP_BLOCK_MPU6050_SOURCE;
+#else
+    return PP_BLOCK_POLAR_SOURCE;
+#endif
+}
+
+static void pipeline_assign_node_states(pp_graph_t *graph)
+{
+    uint8_t i;
+    memset(s_node_state, 0, sizeof(s_node_state));
+    for (i = 0; i < graph->node_count; i++)
+    {
+        const pp_block_manifest_t *manifest = pp_block_get_manifest(graph->nodes[i].block_id);
+        if (manifest && manifest->state_size > 0 && manifest->state_size <= sizeof(s_node_state[i]))
+        {
+            graph->nodes[i].state = s_node_state[i];
+        }
+    }
+}
+
+static uint8_t pipeline_build_default_graph(void)
+{
+    uint16_t rate_hz = pipeline_sample_rate_hz();
+    uint16_t min_lag = (uint16_t)((60UL * rate_hz) / PP_STROKE_RATE_MAX_RPM);
+    uint16_t max_lag = (uint16_t)((60UL * rate_hz) / PP_STROKE_RATE_MIN_RPM);
+
+    memset(&s_pipeline_graph, 0, sizeof(s_pipeline_graph));
+    memset(s_source_params, 0, sizeof(s_source_params));
+
+    write_u16_le(s_source_params, rate_hz);
+    s_source_params[2] = 16;
+    s_select_axis_params[0] = pipeline_axis_param();
+    s_hpf_params[0] = 1;
+    s_hpf_params[1] = 2;
+    write_u16_le(&s_autocorr_params[0], min_lag);
+    write_u16_le(&s_autocorr_params[2], max_lag);
+    s_autocorr_params[4] = 0;
+    s_autocorr_params[5] = PP_AUTOCORR_HARMONIC_PCT;
+    write_u16_le(&s_kalman_params[0], 256);
+    write_u16_le(&s_kalman_params[2], 256);
+    write_u16_le(&s_kalman_params[4], 10000);
+    s_kalman_params[6] = PP_KALMAN_MAX_JUMP_RPM;
+
+    s_pipeline_graph.node_count = 5;
+    s_pipeline_graph.edge_count = 4;
+
+    s_pipeline_graph.nodes[0].block_id = pipeline_source_block_id();
+    s_pipeline_graph.nodes[0].params = s_source_params;
+    s_pipeline_graph.nodes[0].params_len = sizeof(s_source_params);
+    s_pipeline_graph.nodes[1].block_id = PP_BLOCK_SELECT_AXIS;
+    s_pipeline_graph.nodes[1].params = s_select_axis_params;
+    s_pipeline_graph.nodes[1].params_len = sizeof(s_select_axis_params);
+    s_pipeline_graph.nodes[2].block_id = PP_BLOCK_HPF_GRAVITY;
+    s_pipeline_graph.nodes[2].params = s_hpf_params;
+    s_pipeline_graph.nodes[2].params_len = sizeof(s_hpf_params);
+    s_pipeline_graph.nodes[3].block_id = PP_BLOCK_AUTOCORRELATION;
+    s_pipeline_graph.nodes[3].params = s_autocorr_params;
+    s_pipeline_graph.nodes[3].params_len = sizeof(s_autocorr_params);
+    s_pipeline_graph.nodes[4].block_id = PP_BLOCK_KALMAN_2D;
+    s_pipeline_graph.nodes[4].params = s_kalman_params;
+    s_pipeline_graph.nodes[4].params_len = sizeof(s_kalman_params);
+
+    s_pipeline_graph.edges[0] = (pp_edge_t){0, 0, 1, 0};
+    s_pipeline_graph.edges[1] = (pp_edge_t){1, 0, 2, 0};
+    s_pipeline_graph.edges[2] = (pp_edge_t){2, 0, 3, 0};
+    s_pipeline_graph.edges[3] = (pp_edge_t){3, 0, 4, 0};
+
+    pipeline_assign_node_states(&s_pipeline_graph);
+    if (pp_graph_validate_ports(&s_pipeline_graph) != PP_OK) return 0;
+    if (pp_graph_topo_sort(&s_pipeline_graph) != PP_OK) return 0;
+    return 1;
+}
+
+void paddling_pulse_pipeline_init(void)
+{
+    uint16_t binary_len = 0;
+
+    s_pipeline_ready = 0;
+    s_pipeline_rpm = 0;
+
+    if (pp_storage_load_pipeline(s_pipeline_binary, sizeof(s_pipeline_binary), &binary_len))
+    {
+        if (pp_graph_build_from_binary(s_pipeline_binary, binary_len, &s_pipeline_graph) == PP_OK &&
+            pp_graph_validate_ports(&s_pipeline_graph) == PP_OK &&
+            pp_graph_topo_sort(&s_pipeline_graph) == PP_OK)
+        {
+            pipeline_assign_node_states(&s_pipeline_graph);
+            s_pipeline_ready = 1;
+            return;
+        }
+    }
+
+    s_pipeline_ready = pipeline_build_default_graph();
+}
+
+static uint8_t pipeline_current_rpm(void)
+{
+    return s_pipeline_rpm;
+}
+
 static void imu_process_timer_cb(void)
 {
     app_imu_process_timer_used = EASY_TIMER_INVALID_TIMER;
@@ -260,11 +406,22 @@ static void stroke_rate_timer_cb(void)
     app_stroke_rate_timer_used = EASY_TIMER_INVALID_TIMER;
     if (!csc_meas_ntf_enabled) return;
 
-    pp_stroke_rate_update();
+    if (s_pipeline_ready && pp_graph_execute(&s_pipeline_graph) == PP_OK)
+    {
+        uint8_t last_index = s_pipeline_graph.exec_order[s_pipeline_graph.node_count - 1];
+        pp_packet_t *packet = &s_pipeline_graph.nodes[last_index].output;
+        if (packet->length > 0 && packet->data && (packet->kind == PP_KIND_ESTIMATE || packet->kind == PP_KIND_CANDIDATE))
+        {
+            int16_t rpm = packet->data[0];
+            if (rpm < 0) rpm = 0;
+            if (rpm > 255) rpm = 255;
+            s_pipeline_rpm = (uint8_t)rpm;
+        }
+    }
 
 #ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
     paddling_pulse_console_printf("SR: rpm=%u samples=%u\r\n",
-                                  pp_stroke_rate_get_rpm(),
+                                  s_pipeline_rpm,
                                   pp_sample_store_get_count());
 #endif
 
@@ -278,7 +435,7 @@ static void csc_meas_timer_cb(void)
 
     if (app_connection_idx != GAP_INVALID_CONIDX)
     {
-        uint8_t rpm = pp_stroke_rate_get_rpm();
+        uint8_t rpm = pipeline_current_rpm();
         uint8_t cadence = (rpm > 0) ? rpm : current_cadence_rpm;
 
         uint16_t drev, dticks;
@@ -309,6 +466,7 @@ static void pipeline_start(void)
     pp_sample_store_init(100);
 #endif
     pp_stroke_rate_init();
+    paddling_pulse_pipeline_init();
 
     imu_active = pp_imu_init();
     if (imu_active)
@@ -376,6 +534,8 @@ void user_app_init(void)
     
     default_app_on_init();
     paddling_pulse_console_init();
+    pp_pipeline_service_init();
+    paddling_pulse_pipeline_init();
 }
 
 void user_app_on_get_dev_appearance(uint16_t *appearance)
