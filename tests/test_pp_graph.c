@@ -87,12 +87,55 @@ static void test_port_validation(void) {
     printf("  PASS: test_port_validation\n");
 }
 
+/* Test: full pipeline round-trip from binary payload through graph execution */
+static void test_full_pipeline_roundtrip(void) {
+    uint8_t payload[] = {
+        0x50, 0x50, 0x01, 0x05, 0x04, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x01, 0x06, 0x01, 0x00, 0x03, 0x64, 0x00, 0x10,
+        0x01, 0x04, 0x04, 0x01, 0x01, 0x02,
+        0x01, 0x05, 0x06, 0x02, 0x02, 0x01, 0x02,
+        0x01, 0x09, 0x08, 0x03, 0x06, 0x14, 0x00, 0x50, 0x00, 0x00, 0x80,
+        0x01, 0x0A, 0x0F, 0x04, 0x07, 0x00, 0x01, 0x00, 0x01, 0x10, 0x27, 0x30,
+        0x02, 0x04, 0x00, 0x00, 0x01, 0x00,
+        0x02, 0x04, 0x01, 0x00, 0x02, 0x00,
+        0x02, 0x04, 0x02, 0x00, 0x03, 0x00,
+        0x02, 0x04, 0x03, 0x00, 0x04, 0x00
+    };
+    uint16_t body_len = (uint16_t)(sizeof(payload) - PP_PROTOCOL_HEADER_SIZE);
+    uint16_t crc;
+    pp_graph_t g = {0};
+    uint8_t last_index;
+    int16_t spm;
+
+    payload[6] = (uint8_t)(body_len & 0xFF);
+    payload[7] = (uint8_t)(body_len >> 8);
+    crc = pp_protocol_crc16(payload + PP_PROTOCOL_HEADER_SIZE, body_len);
+    payload[8] = (uint8_t)(crc & 0xFF);
+    payload[9] = (uint8_t)(crc >> 8);
+
+    assert(pp_graph_build_from_binary(payload, sizeof(payload), &g) == PP_OK);
+    assert(pp_graph_validate_ports(&g) == PP_OK);
+    assert(pp_graph_topo_sort(&g) == PP_OK);
+    assert(pp_graph_execute(&g) == PP_OK);
+
+    last_index = g.exec_order[g.node_count - 1];
+    assert(g.nodes[last_index].output.kind == PP_KIND_ESTIMATE);
+    assert(g.nodes[last_index].output.length >= 1);
+    spm = g.nodes[last_index].output.data[0];
+    assert(spm >= 110 && spm <= 130);
+    printf("  PASS: test_full_pipeline_roundtrip (spm=%d)\n", spm);
+}
+
 int main(void) {
     printf("test_pp_graph:\n");
     test_topo_sort_linear();
     test_topo_sort_cycle();
     test_graph_from_binary();
     test_port_validation();
+    test_full_pipeline_roundtrip();
     printf("All tests passed.\n");
     return 0;
 }

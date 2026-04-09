@@ -86,7 +86,9 @@ static pp_block_result_t fill_test_source(
     }
 
     for (i = 0; i < samples; i++) {
-        int16_t base = (int16_t)(block_id * 100 + i * 10);
+        uint16_t phase = (uint16_t)(i % 50U);
+        int16_t wave = (int16_t)((phase < 25U) ? (int16_t)(phase * 160U - 2000U) : (int16_t)((50U - phase) * 160U - 2000U));
+        int16_t base = (int16_t)(wave + block_id * 10);
         outputs[0].data[(uint16_t)(i * 3U + 0U)] = base;
         outputs[0].data[(uint16_t)(i * 3U + 1U)] = (int16_t)(base + 1);
         outputs[0].data[(uint16_t)(i * 3U + 2U)] = (int16_t)(base + 2);
