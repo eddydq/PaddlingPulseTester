@@ -100,10 +100,10 @@ uint8_t current_cadence_rpm                     __SECTION_ZERO("retention_mem_ar
 struct cscp_csc_meas csc_meas_state             __SECTION_ZERO("retention_mem_area0"); //@RETENTION MEMORY
 
 static pp_graph_t s_pipeline_graph;
-static uint8_t s_pipeline_binary[PP_PIPELINE_MAX_BYTES];
 static uint8_t s_pipeline_ready;
 static uint8_t s_pipeline_rpm;
-static uint8_t s_node_state[PP_MAX_NODES][32];
+#define PP_PIPELINE_NODE_STATE_BYTES 16
+static uint8_t s_node_state[PP_MAX_NODES][PP_PIPELINE_NODE_STATE_BYTES];
 
 static uint8_t s_source_params[3];
 static uint8_t s_select_axis_params[1];
@@ -368,13 +368,15 @@ static uint8_t pipeline_build_default_graph(void)
 void paddling_pulse_pipeline_init(void)
 {
     uint16_t binary_len = 0;
+    const uint8_t *pipeline_binary;
 
     s_pipeline_ready = 0;
     s_pipeline_rpm = 0;
 
-    if (pp_storage_load_pipeline(s_pipeline_binary, sizeof(s_pipeline_binary), &binary_len))
+    pipeline_binary = pp_storage_pipeline_data(&binary_len);
+    if (pipeline_binary)
     {
-        if (pp_graph_build_from_binary(s_pipeline_binary, binary_len, &s_pipeline_graph) == PP_OK &&
+        if (pp_graph_build_from_binary(pipeline_binary, binary_len, &s_pipeline_graph) == PP_OK &&
             pp_graph_validate_ports(&s_pipeline_graph) == PP_OK &&
             pp_graph_topo_sort(&s_pipeline_graph) == PP_OK)
         {

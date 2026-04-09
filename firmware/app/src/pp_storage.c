@@ -56,8 +56,10 @@ bool pp_storage_save_pipeline(const uint8_t *data, uint16_t len)
         return false;
     }
 
-    memset(&s_pipeline, 0, sizeof(s_pipeline));
-    memcpy(s_pipeline.data, data, len);
+    if (data != s_pipeline.data) {
+        memset(&s_pipeline, 0, sizeof(s_pipeline));
+        memcpy(s_pipeline.data, data, len);
+    }
     s_pipeline.len = len;
     return true;
 }
@@ -77,6 +79,35 @@ bool pp_storage_load_pipeline(uint8_t *buf, uint16_t buf_size, uint16_t *out_len
     memcpy(buf, s_pipeline.data, s_pipeline.len);
     *out_len = s_pipeline.len;
     return true;
+}
+
+const uint8_t *pp_storage_pipeline_data(uint16_t *out_len)
+{
+    if (!out_len || !pp_storage_has_valid_pipeline()) {
+        return 0;
+    }
+
+    *out_len = s_pipeline.len;
+    return s_pipeline.data;
+}
+
+uint8_t *pp_storage_pipeline_write_buffer(uint16_t *capacity)
+{
+    if (capacity) {
+        *capacity = PP_PIPELINE_MAX_BYTES;
+    }
+    return s_pipeline.data;
+}
+
+void pp_storage_begin_pipeline_write(void)
+{
+    s_pipeline.len = 0;
+    s_pipeline.reserved = 0;
+}
+
+bool pp_storage_commit_pipeline(uint16_t len)
+{
+    return pp_storage_save_pipeline(s_pipeline.data, len);
 }
 
 bool pp_storage_has_valid_pipeline(void)

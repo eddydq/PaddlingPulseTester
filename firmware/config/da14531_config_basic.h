@@ -91,7 +91,7 @@
 /****************************************************************************************************************/
 /* Console mode: single-wire UART now, AT command support later.                                                */
 /****************************************************************************************************************/
-#define CFG_PADDLING_PULSE_CONSOLE_MODE
+#undef CFG_PADDLING_PULSE_CONSOLE_MODE
 
 #if defined(CFG_PADDLING_PULSE_CONSOLE_MODE)
     #define CFG_PADDLING_PULSE_AT_COMMANDS

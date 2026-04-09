@@ -8,7 +8,6 @@
 static uint8_t s_status;
 static uint8_t s_expected_seq;
 static uint16_t s_rx_len;
-static uint8_t s_rx_buf[PP_PIPELINE_MAX_BYTES];
 
 static void reset_transfer(uint8_t status)
 {
@@ -27,12 +26,14 @@ uint8_t pp_pipeline_service_status(void)
     return s_status;
 }
 
-static uint8_t validate_and_save(const uint8_t *data, uint16_t len)
+static uint8_t validate_and_save(uint16_t len)
 {
     pp_protocol_header_t header;
     pp_graph_t graph;
+    uint16_t capacity = 0;
+    uint8_t *data = pp_storage_pipeline_write_buffer(&capacity);
 
-    if (pp_protocol_validate(data, len, &header) != PP_PROTO_OK) {
+    if (!data || len > capacity || pp_protocol_validate(data, len, &header) != PP_PROTO_OK) {
         return PP_SVC_STATUS_ERR_CRC;
     }
     if (pp_graph_build_from_binary(data, len, &graph) != PP_OK) {
@@ -44,7 +45,7 @@ static uint8_t validate_and_save(const uint8_t *data, uint16_t len)
     if (pp_graph_topo_sort(&graph) != PP_OK) {
         return PP_SVC_STATUS_ERR_GRAPH;
     }
-    if (!pp_storage_save_pipeline(data, len)) {
+    if (!pp_storage_commit_pipeline(len)) {
         return PP_SVC_STATUS_ERR_CRC;
     }
 
@@ -58,6 +59,8 @@ void pp_pipeline_service_on_write(const uint8_t *data, uint16_t len)
     uint8_t flags;
     const uint8_t *payload;
     uint16_t payload_len;
+    uint16_t capacity = 0;
+    uint8_t *rx_buf;
 
     if (!data || len < 2U) {
         reset_transfer(PP_SVC_STATUS_ERR_GRAPH);
@@ -75,6 +78,7 @@ void pp_pipeline_service_on_write(const uint8_t *data, uint16_t len)
     }
 
     if ((flags & PP_CHUNK_FLAG_FIRST) != 0U) {
+        pp_storage_begin_pipeline_write();
         s_expected_seq = 0;
         s_rx_len = 0;
         s_status = PP_SVC_STATUS_RECEIVING;
@@ -85,16 +89,17 @@ void pp_pipeline_service_on_write(const uint8_t *data, uint16_t len)
         return;
     }
 
-    if ((uint32_t)s_rx_len + payload_len > PP_PIPELINE_MAX_BYTES) {
+    rx_buf = pp_storage_pipeline_write_buffer(&capacity);
+    if (!rx_buf || (uint32_t)s_rx_len + payload_len > capacity) {
         reset_transfer(PP_SVC_STATUS_ERR_TOO_LARGE);
         return;
     }
 
-    memcpy(&s_rx_buf[s_rx_len], payload, payload_len);
+    memcpy(&rx_buf[s_rx_len], payload, payload_len);
     s_rx_len = (uint16_t)(s_rx_len + payload_len);
 
     if ((flags & PP_CHUNK_FLAG_LAST) != 0U) {
-        uint8_t result_status = validate_and_save(s_rx_buf, s_rx_len);
+        uint8_t result_status = validate_and_save(s_rx_len);
         reset_transfer(result_status);
         return;
     }

@@ -176,7 +176,7 @@ uint8_t pp_graph_validate_ports(const pp_graph_t *graph)
 
 uint8_t pp_graph_execute(pp_graph_t *graph)
 {
-    static int16_t scratch[PP_MAX_NODES][PP_GRAPH_PACKET_CAPACITY];
+    static int16_t scratch[2][PP_GRAPH_PACKET_CAPACITY];
     uint8_t order_index;
 
     if (!graph || graph->node_count > PP_MAX_NODES) {
@@ -220,7 +220,7 @@ uint8_t pp_graph_execute(pp_graph_t *graph)
             return PP_ERR;
         }
         for (port = 0; port < output_count; port++) {
-            outputs[port].data = scratch[node_index];
+            outputs[port].data = scratch[order_index & 1U];
             outputs[port].length = PP_GRAPH_PACKET_CAPACITY;
             outputs[port].kind = manifest->output_kinds[port];
             outputs[port].axis = PP_AXIS_ALL;
