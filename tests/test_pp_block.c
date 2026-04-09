@@ -127,6 +127,67 @@ static void test_lowpass(void) {
     printf("  PASS: test_lowpass\n");
 }
 
+/* Test: autocorrelation finds dominant period in a periodic signal */
+static void test_autocorrelation(void) {
+    int16_t series[512];
+    int i;
+    for (i = 0; i < 512; i++) {
+        int phase = i % 100;
+        series[i] = (int16_t)((phase < 50) ? (phase * 200 - 5000) : ((100 - phase) * 200 - 5000));
+    }
+    pp_packet_t input = {
+        .data = series, .length = 512,
+        .kind = PP_KIND_SERIES, .axis = PP_AXIS_Z,
+        .sample_rate_hz = 100
+    };
+
+    uint8_t params[] = {50, 0, 200, 0, 30, 80};
+    int16_t out_buf[2];
+    pp_packet_t output = { .data = out_buf, .length = 2 };
+
+    pp_block_result_t result = pp_block_exec(
+        PP_BLOCK_AUTOCORRELATION, &input, 1, params, 6, NULL, &output, 1
+    );
+
+    assert(result.status == PP_OK);
+    assert(output.kind == PP_KIND_CANDIDATE);
+    assert(output.axis == PP_AXIS_Z);
+    assert(output.length == 2);
+    assert(out_buf[0] >= 55 && out_buf[0] <= 65);
+    assert(out_buf[1] >= 0);
+    printf("  PASS: test_autocorrelation (spm=%d)\n", out_buf[0]);
+}
+
+/* Test: fft_dominant finds dominant frequency */
+static void test_fft_dominant(void) {
+    int16_t series[256];
+    int i;
+    for (i = 0; i < 256; i++) {
+        int phase = i % 100;
+        series[i] = (int16_t)((phase < 50) ? (phase * 200 - 5000) : ((100 - phase) * 200 - 5000));
+    }
+    pp_packet_t input = {
+        .data = series, .length = 256,
+        .kind = PP_KIND_SERIES, .axis = PP_AXIS_Z,
+        .sample_rate_hz = 100
+    };
+
+    uint8_t params[] = {0, 5, 0};
+    int16_t out_buf[2];
+    pp_packet_t output = { .data = out_buf, .length = 2 };
+
+    pp_block_result_t result = pp_block_exec(
+        PP_BLOCK_FFT_DOMINANT, &input, 1, params, 3, NULL, &output, 1
+    );
+
+    assert(result.status == PP_OK);
+    assert(output.kind == PP_KIND_CANDIDATE);
+    assert(output.axis == PP_AXIS_Z);
+    assert(output.length == 2);
+    assert(out_buf[0] >= 50 && out_buf[0] <= 80);
+    printf("  PASS: test_fft_dominant (spm=%d)\n", out_buf[0]);
+}
+
 int main(void) {
     printf("test_pp_block:\n");
     test_select_axis_z();
@@ -134,6 +195,8 @@ int main(void) {
     test_block_registry();
     test_hpf_gravity();
     test_lowpass();
+    test_autocorrelation();
+    test_fft_dominant();
     printf("All tests passed.\n");
     return 0;
 }

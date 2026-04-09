@@ -38,6 +38,24 @@ extern pp_block_result_t pp_lowpass_exec(
     pp_packet_t *outputs,
     uint8_t num_outputs);
 
+extern pp_block_result_t pp_autocorrelation_exec(
+    const pp_packet_t *inputs,
+    uint8_t num_inputs,
+    const uint8_t *params,
+    uint16_t params_len,
+    uint8_t *state,
+    pp_packet_t *outputs,
+    uint8_t num_outputs);
+
+extern pp_block_result_t pp_fft_dominant_exec(
+    const pp_packet_t *inputs,
+    uint8_t num_inputs,
+    const uint8_t *params,
+    uint16_t params_len,
+    uint8_t *state,
+    pp_packet_t *outputs,
+    uint8_t num_outputs);
+
 typedef struct {
     pp_block_manifest_t manifest;
     pp_block_exec_fn exec;
@@ -91,6 +109,30 @@ static const pp_block_entry_t s_registry[] = {
             .state_size = 8
         },
         .exec = pp_lowpass_exec
+    },
+    {
+        .manifest = {
+            .block_id = PP_BLOCK_AUTOCORRELATION,
+            .group = 3,
+            .num_inputs = 1,
+            .num_outputs = 1,
+            .input_kinds = {PP_KIND_SERIES, 0, 0},
+            .output_kinds = {PP_KIND_CANDIDATE, 0, 0},
+            .state_size = 0
+        },
+        .exec = pp_autocorrelation_exec
+    },
+    {
+        .manifest = {
+            .block_id = PP_BLOCK_FFT_DOMINANT,
+            .group = 3,
+            .num_inputs = 1,
+            .num_outputs = 1,
+            .input_kinds = {PP_KIND_SERIES, 0, 0},
+            .output_kinds = {PP_KIND_CANDIDATE, 0, 0},
+            .state_size = 0
+        },
+        .exec = pp_fft_dominant_exec
     },
 };
 
