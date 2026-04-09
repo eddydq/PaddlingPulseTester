@@ -251,6 +251,150 @@ static void test_zero_crossing_detect(void) {
     printf("  PASS: test_zero_crossing_detect (spm=%d crossings=%d)\n", out_buf[0], out_buf[1]);
 }
 
+/* Test: spm_range_gate passes in-range candidates and skips out-of-range */
+static void test_spm_range_gate(void) {
+    int16_t candidate[] = {60, 80};
+    int16_t out_buf[2] = {0};
+    pp_packet_t input = {
+        .data = candidate, .length = 2,
+        .kind = PP_KIND_CANDIDATE, .axis = PP_AXIS_Z,
+        .sample_rate_hz = 10
+    };
+    pp_packet_t output = { .data = out_buf, .length = 2 };
+    uint8_t params[] = {30, 200};
+
+    pp_block_result_t result = pp_block_exec(
+        PP_BLOCK_SPM_RANGE_GATE, &input, 1, params, 2, NULL, &output, 1
+    );
+    assert(result.status == PP_OK);
+    assert(output.kind == PP_KIND_CANDIDATE);
+    assert(out_buf[0] == 60);
+
+    candidate[0] = 250;
+    result = pp_block_exec(
+        PP_BLOCK_SPM_RANGE_GATE, &input, 1, params, 2, NULL, &output, 1
+    );
+    assert(result.status == PP_SKIP);
+    printf("  PASS: test_spm_range_gate\n");
+}
+
+/* Test: peak_selector selects the most prominent local peak */
+static void test_peak_selector(void) {
+    int16_t candidate[] = {60, 80};
+    int16_t series[] = {0, 20, 100, 20, 0, 40, 300, 40, 0};
+    pp_packet_t inputs[2] = {
+        {.data = candidate, .length = 2, .kind = PP_KIND_CANDIDATE, .axis = PP_AXIS_Z, .sample_rate_hz = 10},
+        {.data = series, .length = 9, .kind = PP_KIND_SERIES, .axis = PP_AXIS_Z, .sample_rate_hz = 10}
+    };
+    uint8_t params[] = {50, 0, 2, 0};
+    int16_t out_buf[2] = {0};
+    pp_packet_t output = { .data = out_buf, .length = 2 };
+
+    pp_block_result_t result = pp_block_exec(
+        PP_BLOCK_PEAK_SELECTOR, inputs, 2, params, 4, NULL, &output, 1
+    );
+
+    assert(result.status == PP_OK);
+    assert(output.kind == PP_KIND_CANDIDATE);
+    assert(out_buf[0] == 6);
+    assert(out_buf[1] == 300);
+    printf("  PASS: test_peak_selector\n");
+}
+
+/* Test: confidence_gate routes candidate to pass or fallback output */
+static void test_confidence_gate(void) {
+    int16_t candidate[] = {60, 80};
+    pp_packet_t input = {
+        .data = candidate, .length = 2,
+        .kind = PP_KIND_CANDIDATE, .axis = PP_AXIS_Z,
+        .sample_rate_hz = 10
+    };
+    uint8_t params[] = {50, 0, 0};
+    int16_t pass_buf[2] = {0};
+    int16_t reject_buf[2] = {0};
+    pp_packet_t outputs[2] = {
+        {.data = pass_buf, .length = 2},
+        {.data = reject_buf, .length = 2}
+    };
+
+    pp_block_result_t result = pp_block_exec(
+        PP_BLOCK_CONFIDENCE_GATE, &input, 1, params, 3, NULL, outputs, 2
+    );
+    assert(result.status == PP_OK);
+    assert(outputs[0].length == 2);
+    assert(pass_buf[0] == 60);
+    assert(outputs[1].length == 0);
+
+    candidate[1] = 20;
+    result = pp_block_exec(
+        PP_BLOCK_CONFIDENCE_GATE, &input, 1, params, 3, NULL, outputs, 2
+    );
+    assert(result.status == PP_OK);
+    assert(outputs[0].length == 0);
+    assert(outputs[1].length == 2);
+    assert(reject_buf[0] == 0);
+    printf("  PASS: test_confidence_gate\n");
+}
+
+/* Test: kalman_2d smooths noisy SPM candidates with persistent state */
+static void test_kalman_2d(void) {
+    int16_t candidate[] = {58, 80};
+    pp_packet_t input = {
+        .data = candidate, .length = 2,
+        .kind = PP_KIND_CANDIDATE, .axis = PP_AXIS_Z,
+        .sample_rate_hz = 10
+    };
+    uint8_t params[] = {0, 1, 0, 1, 0x10, 0x27, 20};
+    uint8_t state[32] = {0};
+    int16_t out_buf[2] = {0};
+    pp_packet_t output = { .data = out_buf, .length = 2 };
+
+    pp_block_result_t result = pp_block_exec(
+        PP_BLOCK_KALMAN_2D, &input, 1, params, 7, state, &output, 1
+    );
+    assert(result.status == PP_OK);
+
+    candidate[0] = 62;
+    result = pp_block_exec(
+        PP_BLOCK_KALMAN_2D, &input, 1, params, 7, state, &output, 1
+    );
+    assert(result.status == PP_OK);
+
+    candidate[0] = 60;
+    result = pp_block_exec(
+        PP_BLOCK_KALMAN_2D, &input, 1, params, 7, state, &output, 1
+    );
+    assert(result.status == PP_OK);
+    assert(output.kind == PP_KIND_ESTIMATE);
+    assert(out_buf[0] >= 58 && out_buf[0] <= 62);
+    printf("  PASS: test_kalman_2d (spm=%d)\n", out_buf[0]);
+}
+
+/* Test: confirmation_filter requires N consistent readings */
+static void test_confirmation_filter(void) {
+    int16_t estimate[] = {60, 80};
+    pp_packet_t input = {
+        .data = estimate, .length = 2,
+        .kind = PP_KIND_ESTIMATE, .axis = PP_AXIS_Z,
+        .sample_rate_hz = 10
+    };
+    uint8_t params[] = {3, 10};
+    uint8_t state[16] = {0};
+    int16_t out_buf[2] = {0};
+    pp_packet_t output = { .data = out_buf, .length = 2 };
+    pp_block_result_t result;
+
+    result = pp_block_exec(PP_BLOCK_CONFIRMATION, &input, 1, params, 2, state, &output, 1);
+    assert(result.status == PP_SKIP);
+    result = pp_block_exec(PP_BLOCK_CONFIRMATION, &input, 1, params, 2, state, &output, 1);
+    assert(result.status == PP_SKIP);
+    result = pp_block_exec(PP_BLOCK_CONFIRMATION, &input, 1, params, 2, state, &output, 1);
+    assert(result.status == PP_OK);
+    assert(output.kind == PP_KIND_ESTIMATE);
+    assert(out_buf[0] == 60);
+    printf("  PASS: test_confirmation_filter\n");
+}
+
 int main(void) {
     printf("test_pp_block:\n");
     test_select_axis_z();
@@ -262,6 +406,11 @@ int main(void) {
     test_fft_dominant();
     test_adaptive_peak_detect();
     test_zero_crossing_detect();
+    test_spm_range_gate();
+    test_peak_selector();
+    test_confidence_gate();
+    test_kalman_2d();
+    test_confirmation_filter();
     printf("All tests passed.\n");
     return 0;
 }
