@@ -191,20 +191,22 @@ Data types:
 
 Pipeline: `lis3dh → select_axis(Z) → hpf_gravity → autocorrelation → kalman_2d`
 
+TLV length = total value bytes (block_id + node_index + param_length + params).
+
 ```
 Header:  50 50 01 05 04 00 xx xx xx xx 00 00   (12 bytes)
-Block 0: 01 03 01 00 02                         (lis3dh, 100Hz, 12-bit)
-Block 1: 01 03 04 01 02                         (select_axis, Z)
-Block 2: 01 05 06 02 00 20 04                   (hpf_gravity, cutoff+order)
-Block 3: 01 06 08 03 1E C8 33 00               (autocorrelation, lags+conf)
-Block 4: 01 06 0F 04 xx xx xx xx               (kalman_2d, q/r/p/jump)
+Block 0: 01 05 01 00 02 64 0C                   (lis3dh, params: 100Hz=0x64, 12-bit=0x0C)
+Block 1: 01 04 04 01 01 02                      (select_axis, params: Z=0x02)
+Block 2: 01 06 06 02 03 00 20 04                (hpf_gravity, params: cutoff+order)
+Block 3: 01 07 08 03 04 1E C8 33 50            (autocorrelation, params: lags+conf+harm)
+Block 4: 01 07 0F 04 04 xx xx xx xx            (kalman_2d, params: q/r/p_max/jump)
 Edge 0:  02 04 00 00 01 00                      (0:0 → 1:0)
 Edge 1:  02 04 01 00 02 00                      (1:0 → 2:0)
-Edge 2:  02 04 02 00 03 00                      (2:0 → 3:0)
+Edge 2:  02 04 02 00 03 00                      (2:0 �� 3:0)
 Edge 3:  02 04 03 00 04 00                      (3:0 → 4:0)
 ```
 
-~70 bytes for a 5-block pipeline. With precomputed data blobs, ~120-400 bytes.
+~80 bytes for a 5-block pipeline. With precomputed data blobs, ~120-400 bytes.
 
 ---
 
@@ -229,6 +231,10 @@ Each write to the Control Point:
 
 - `seq` — chunk sequence number (0-based)
 - `flags` — bit 0: first chunk, bit 1: last chunk, bit 2: abort
+
+A "first chunk" flag resets the receive buffer (implicitly aborts any
+in-progress transfer). A 10-second inactivity timeout clears the buffer if a
+transfer stalls mid-stream. Out-of-order chunks are rejected (status 0x80).
 
 ### 4.3 Transfer Flow
 
@@ -325,12 +331,17 @@ to default. Run once, result cached in `exec_order[]`.
 
 ### 5.5 Memory Budget
 
-| Component           | Estimate    |
-|---------------------|-------------|
-| pp_graph_t struct   | ~400 bytes  |
-| Node state (all)    | ~200 bytes  |
-| Packet buffer reuse | 0 (in-place)|
-| **Total overhead**  | **~600 bytes** |
+| Component                          | Estimate     |
+|------------------------------------|--------------|
+| pp_graph_t struct                  | ~400 bytes   |
+| Node state (all stateful blocks)   | ~200 bytes   |
+| Pipeline binary (retained RAM)     | 512 bytes    |
+| Scratch buffer (shared, 1 window)  | ~1024 bytes  |
+| **Total overhead**                 | **~2.1 KB**  |
+
+Nodes write output into a shared scratch buffer (double-buffered: current and
+previous). Each node overwrites the previous output since execution follows
+topological order. This avoids per-node allocation for window-sized data.
 
 ---
 
@@ -378,6 +389,12 @@ flow builder palette. Website and firmware always agree on block definitions.
 
 Pipeline binary stored in retained memory section (survives sleep, lost on
 power removal). Validation via magic bytes + CRC on boot.
+
+**Capacity:** `PP_PIPELINE_MAX_BYTES = 512`. This covers the largest realistic
+pipeline (~16 blocks with precomputed coefficients). The BLE reassembly buffer
+reuses the same 512-byte region (receive into it, then validate in-place).
+The `CFG_RET_DATA_SIZE` must be increased from 1860 to accommodate this
+reservation.
 
 ### 7.2 Future: External I2C EEPROM
 
