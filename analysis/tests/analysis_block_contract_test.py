@@ -1,5 +1,5 @@
-from analysis.scripts.block_contract import Packet, BlockResult
-from analysis.scripts.block_manifest import BlockManifest
+from analysis.scripts.blocks import Packet, BlockResult
+from analysis.scripts.blocks import BlockManifest
 
 
 def test_packet_round_trips_through_dict():

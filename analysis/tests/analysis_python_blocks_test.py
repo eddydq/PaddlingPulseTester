@@ -1,4 +1,4 @@
-from analysis.scripts.block_contract import Packet
+from analysis.scripts.blocks import Packet
 from analysis.algorithms.representation.py.select_axis import BLOCK as SELECT_AXIS
 from analysis.algorithms.estimation.py.autocorrelation import BLOCK as AUTOCORR
 from analysis.algorithms.validation.py.spm_range_gate import BLOCK as RANGE_GATE

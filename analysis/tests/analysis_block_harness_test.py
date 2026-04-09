@@ -1,5 +1,5 @@
-from analysis.scripts.block_catalog import load_block_catalog
-from analysis.scripts.exercise_all_blocks import exercise_python_blocks
+from analysis.scripts.blocks import load_block_catalog
+from analysis.scripts.blocks import exercise_python_blocks
 
 
 def test_catalog_contains_all_python_block_groups():

@@ -156,3 +156,114 @@ def test_peak_selector_last():
     pkt = Packet(kind="candidate", data={"intervals": [1.0, 1.1, 0.9, 1.0, 1.05]}, sample_rate_hz=52.0)
     result = BLOCK.run({"source": [pkt]}, {"count": 3, "strategy": "last"}, {})
     assert len(result.outputs["primary"][0].data["intervals"]) == 3
+
+
+def test_interval_gate_accepts():
+    from analysis.algorithms.validation.py.interval_gate import BLOCK
+
+    pkt = Packet(kind="candidate", data={"intervals": [1.0]})
+    result = BLOCK.run({"source": [pkt]}, {"min_s": 0.5, "max_s": 3.0}, {})
+    assert len(result.outputs["accepted"]) == 1
+
+
+def test_interval_gate_rejects():
+    from analysis.algorithms.validation.py.interval_gate import BLOCK
+
+    pkt = Packet(kind="candidate", data={"intervals": [0.1]})
+    result = BLOCK.run({"source": [pkt]}, {"min_s": 0.5, "max_s": 3.0}, {})
+    assert len(result.outputs["rejected"]) == 1
+
+
+def test_consensus_band():
+    from analysis.algorithms.validation.py.consensus_band import BLOCK
+
+    pkts = [
+        Packet(kind="candidate", data={"spm": 60.0}),
+        Packet(kind="candidate", data={"spm": 62.0}),
+        Packet(kind="candidate", data={"spm": 120.0}),
+    ]
+    result = BLOCK.run({"source": pkts}, {"tolerance_spm": 5.0}, {})
+    assert len(result.outputs["accepted"]) == 2
+    assert len(result.outputs["rejected"]) == 1
+
+
+def test_harmonic_reject_rejects_double():
+    from analysis.algorithms.validation.py.harmonic_reject import BLOCK
+
+    pkt = Packet(kind="candidate", data={"spm": 120.0})
+    result = BLOCK.run({"source": [pkt]}, {"fundamental_spm": 60.0, "tolerance_spm": 5.0}, {})
+    assert len(result.outputs["rejected"]) == 1
+
+
+def test_harmonic_reject_accepts_fundamental():
+    from analysis.algorithms.validation.py.harmonic_reject import BLOCK
+
+    pkt = Packet(kind="candidate", data={"spm": 60.0})
+    result = BLOCK.run({"source": [pkt]}, {"fundamental_spm": 60.0, "tolerance_spm": 5.0}, {})
+    assert len(result.outputs["accepted"]) == 1
+
+
+def test_confidence_gate():
+    from analysis.algorithms.validation.py.confidence_gate import BLOCK
+
+    pkt_good = Packet(kind="candidate", data={"spm": 60.0}, confidence=0.8)
+    pkt_bad = Packet(kind="candidate", data={"spm": 60.0}, confidence=0.2)
+    r1 = BLOCK.run({"source": [pkt_good]}, {"min_confidence": 0.5}, {})
+    r2 = BLOCK.run({"source": [pkt_bad]}, {"min_confidence": 0.5}, {})
+    assert len(r1.outputs["accepted"]) == 1
+    assert len(r2.outputs["rejected"]) == 1
+
+
+def test_fallback_selector():
+    from analysis.algorithms.validation.py.fallback_selector import BLOCK
+
+    pkts = [
+        Packet(kind="candidate", data={"spm": 60.0}, confidence=0.5),
+        Packet(kind="candidate", data={"spm": 65.0}, confidence=0.9),
+        Packet(kind="candidate", data={"spm": 70.0}, confidence=0.3),
+    ]
+    result = BLOCK.run({"source": pkts}, {}, {})
+    assert result.outputs["selected"][0].data["spm"] == 65.0
+
+
+def test_kalman_2d_smooths():
+    from analysis.algorithms.suivi.py.kalman_2d import BLOCK
+
+    state = {}
+    results = []
+    for spm in [60.0, 62.0, 58.0, 61.0]:
+        pkt = Packet(kind="candidate", data={"spm": spm})
+        result = BLOCK.run({"source": [pkt]}, {}, state)
+        state = result.state
+        results.append(result.outputs["primary"][0].data["spm"])
+    assert all(isinstance(value, float) for value in results)
+    assert results[-1] != 61.0
+
+
+def test_confirmation_filter_requires_streak():
+    from analysis.algorithms.suivi.py.confirmation_filter import BLOCK
+
+    state = {}
+    pkt = Packet(kind="estimate", data={"spm": 60.0})
+    r1 = BLOCK.run({"source": [pkt]}, {"required_streak": 3}, state)
+    assert r1.outputs["primary"] == []
+    state = r1.state
+    r2 = BLOCK.run({"source": [pkt]}, {"required_streak": 3}, state)
+    assert r2.outputs["primary"] == []
+    state = r2.state
+    r3 = BLOCK.run({"source": [pkt]}, {"required_streak": 3}, state)
+    assert len(r3.outputs["primary"]) == 1
+
+
+def test_invalid_streak_reset():
+    from analysis.algorithms.suivi.py.invalid_streak_reset import BLOCK
+
+    state = {}
+    empty = Packet(kind="estimate", data={"spm": 0.0})
+    for _ in range(4):
+        result = BLOCK.run({"source": [empty]}, {"max_invalid": 5}, state)
+        state = result.state
+    assert state.get("invalid_count", 0) == 4
+    assert state.get("reset", False) is False
+    result = BLOCK.run({"source": [empty]}, {"max_invalid": 5}, state)
+    assert result.state.get("reset", False) is True
