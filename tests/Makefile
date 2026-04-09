@@ -11,5 +11,8 @@ test_pp_block: test_pp_block.c ../firmware/app/src/pp_block.c ../firmware/app/sr
 test_pp_protocol: test_pp_protocol.c ../firmware/app/src/pp_protocol.c
 	$(CC) $(CFLAGS) -o $@ $^
 
+test_pp_graph: test_pp_graph.c ../firmware/app/src/pp_graph.c ../firmware/app/src/pp_protocol.c ../firmware/app/src/pp_block.c ../firmware/app/src/pp_block_representation.c ../firmware/app/src/pp_block_pretraitement.c ../firmware/app/src/pp_block_estimation.c ../firmware/app/src/pp_block_detection.c ../firmware/app/src/pp_block_validation.c ../firmware/app/src/pp_block_suivi.c
+	$(CC) $(CFLAGS) -o $@ $^
+
 clean:
 	rm -f $(TESTS)
