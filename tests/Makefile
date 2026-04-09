@@ -5,7 +5,7 @@ TESTS = test_pp_block test_pp_protocol test_pp_graph
 all: $(TESTS)
 	@for t in $(TESTS); do echo "--- $$t ---"; ./$$t; done
 
-test_pp_block: test_pp_block.c ../firmware/app/src/pp_block.c ../firmware/app/src/pp_block_representation.c
+test_pp_block: test_pp_block.c ../firmware/app/src/pp_block.c ../firmware/app/src/pp_block_representation.c ../firmware/app/src/pp_block_pretraitement.c
 	$(CC) $(CFLAGS) -o $@ $^
 
 clean:

@@ -73,11 +73,67 @@ static void test_block_registry(void) {
     printf("  PASS: test_block_registry\n");
 }
 
+/* Test: hpf_gravity removes DC offset from series */
+static void test_hpf_gravity(void) {
+    int16_t series[] = {1005, 1010, 1005, 1000, 995, 990, 995, 1000};
+    pp_packet_t input = {
+        .data = series, .length = 8,
+        .kind = PP_KIND_SERIES, .axis = PP_AXIS_Z,
+        .sample_rate_hz = 100
+    };
+
+    uint8_t params[] = {1, 2};
+    int16_t out_buf[8];
+    pp_packet_t output = { .data = out_buf, .length = 8 };
+    uint8_t state[64] = {0};
+
+    pp_block_result_t result = pp_block_exec(
+        PP_BLOCK_HPF_GRAVITY, &input, 1, params, 2, state, &output, 1
+    );
+
+    assert(result.status == PP_OK);
+    assert(output.kind == PP_KIND_SERIES);
+    assert(output.axis == PP_AXIS_Z);
+    assert(output.length == 8);
+    assert(out_buf[0] < 500);
+    printf("  PASS: test_hpf_gravity\n");
+}
+
+/* Test: lowpass smooths a step input */
+static void test_lowpass(void) {
+    int16_t series[] = {0, 0, 0, 0, 1000, 1000, 1000, 1000};
+    pp_packet_t input = {
+        .data = series, .length = 8,
+        .kind = PP_KIND_SERIES, .axis = PP_AXIS_Z,
+        .sample_rate_hz = 100
+    };
+
+    uint8_t params[] = {10, 2};
+    int16_t out_buf[8];
+    pp_packet_t output = { .data = out_buf, .length = 8 };
+    uint8_t state[64] = {0};
+
+    pp_block_result_t result = pp_block_exec(
+        PP_BLOCK_LOWPASS, &input, 1, params, 2, state, &output, 1
+    );
+
+    assert(result.status == PP_OK);
+    assert(output.kind == PP_KIND_SERIES);
+    assert(output.axis == PP_AXIS_Z);
+    assert(output.length == 8);
+    assert(out_buf[0] < 500);
+    assert(out_buf[4] > 0);
+    assert(out_buf[4] < 1000);
+    printf("  PASS: test_lowpass\n");
+}
+
 int main(void) {
     printf("test_pp_block:\n");
     test_select_axis_z();
     test_vector_magnitude();
     test_block_registry();
+    test_hpf_gravity();
+    test_lowpass();
     printf("All tests passed.\n");
     return 0;
 }
