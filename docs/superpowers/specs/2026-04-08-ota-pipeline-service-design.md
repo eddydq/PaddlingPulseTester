@@ -56,6 +56,8 @@ typedef struct {
     uint8_t  group;
     uint8_t  num_inputs;
     uint8_t  num_outputs;
+    uint8_t  input_kinds[3];       // packet kind per input port (max 3)
+    uint8_t  output_kinds[3];      // packet kind per output port (max 3)
     uint16_t state_size;           // 0 if stateless
 } pp_block_manifest_t;
 
@@ -132,6 +134,56 @@ pp_source_caps_t lis3dh_caps = {
 Capabilities are exported to the block catalog JSON for the website. The flow
 builder UI disables invalid options per source. Firmware validates on boot as a
 safety net.
+
+### 2.5 Port Types and Connection Rules
+
+Each block has up to 3 input ports and 3 output ports. Ports are typed by
+packet `kind` — only matching kinds can be connected.
+
+**Packet kinds:**
+
+| Kind | Value | Description |
+|------|-------|-------------|
+| `raw_window` | 0 | Raw multi-axis sample buffer from source |
+| `series` | 1 | Single-axis filtered time series |
+| `candidate` | 2 | Estimated value (SPM, Hz, interval) |
+| `estimate` | 3 | Validated/tracked output value |
+
+**Connection rule:** An edge from `src_port` to `dst_port` is valid only if the
+source port's output kind matches the destination port's input kind. The graph
+validator (both firmware and flow builder) rejects mismatched connections.
+
+**Block port definitions (max 3 in, max 3 out):**
+
+| Block                | Inputs (kind)                | Outputs (kind)               |
+|----------------------|------------------------------|------------------------------|
+| lis3dh_source        | —                            | out0: raw_window             |
+| mpu6050_source       | —                            | out0: raw_window             |
+| polar_source         | —                            | out0: raw_window             |
+| select_axis          | in0: raw_window              | out0: series                 |
+| vector_magnitude     | in0: raw_window              | out0: series                 |
+| hpf_gravity          | in0: series                  | out0: series                 |
+| lowpass              | in0: series                  | out0: series                 |
+| autocorrelation      | in0: series                  | out0: candidate              |
+| fft_dominant         | in0: series                  | out0: candidate              |
+| adaptive_peak_detect | in0: series                  | out0: candidate              |
+| zero_crossing_detect | in0: series                  | out0: candidate              |
+| spm_range_gate       | in0: candidate               | out0: candidate              |
+| peak_selector        | in0: candidate, in1: series  | out0: candidate              |
+| confidence_gate      | in0: candidate               | out0: candidate, out1: candidate |
+| kalman_2d            | in0: candidate               | out0: estimate               |
+| confirmation_filter  | in0: estimate                | out0: estimate               |
+
+`confidence_gate` has two outputs: out0 = passed (above threshold), out1 =
+rejected (below threshold). This enables fallback paths where a secondary
+estimator handles low-confidence cases.
+
+`peak_selector` takes both a candidate (intervals) and the original series
+(for refinement), demonstrating a multi-input block.
+
+Port definitions are included in the block manifest and exported to the catalog
+JSON. The flow builder uses them to validate connections visually (snap-to-valid
+ports) and the firmware validates on boot as a safety net.
 
 ---
 
