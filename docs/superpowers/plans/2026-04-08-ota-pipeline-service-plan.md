@@ -1526,34 +1526,166 @@ git commit -m "test: add full pipeline round-trip integration test"
 
 ---
 
+## Task 10A: BLE Custom Service Glue (Plan Addendum)
+
+> **Why this addendum exists:** Task 10 covers the upload state machine, but it does not include the DA14531 `CUSTS1` scaffolding required to expose that logic as a real BLE service. Without the attribute database, write routing, and notification plumbing below, Web Bluetooth cannot discover or use the OTA pipeline service.
+
+**Files:**
+- Create: `firmware/app/include/user_custs_config.h`
+- Create: `firmware/app/include/user_custs1_def.h`
+- Create: `firmware/app/include/user_custs1_impl.h`
+- Create: `firmware/app/src/user_custs1_def.c`
+- Create: `firmware/app/src/user_custs1_impl.c`
+- Modify: `firmware/config/user_modules_config.h`
+- Modify: `firmware/config/user_profiles_config.h`
+- Modify: `firmware/config/user_callback_config.h`
+- Modify: `firmware/app/include/pp_pipeline_service.h`
+- Modify: `firmware/app/src/pp_pipeline_service.c`
+- Modify: `firmware/app/src/paddling_pulse_app.c`
+- Modify: `Makefile`
+- Modify: `tests/test_pp_pipeline_service.c`
+
+### Step 1: Enable the SDK custom-service path
+
+- [ ] Modify `firmware/config/user_modules_config.h`:
+  - Change `#define EXCLUDE_DLG_CUSTS1          (1)` to `(0)` so the SDK includes the Custom Service 1 server task.
+
+- [ ] Modify `firmware/config/user_profiles_config.h`:
+  - Keep `CFG_PRF_PADDLE_PIPELINE`.
+  - Add the SDK-facing custom-server enable macro used by `app_customs.h` / `custs1_task.h` in this codebase's config path so `CUSTS1` code is compiled alongside the app.
+
+- [ ] Create `firmware/app/include/user_custs_config.h`:
+  - Declare `extern const struct cust_prf_func_callbacks cust_prf_funcs[];`
+  - Follow the SDK example layout used in `projects/target_apps/ble_examples/*/src/custom_profile/user_custs_config.h`.
+
+### Step 2: Define the pipeline service attribute database
+
+- [ ] Create `firmware/app/include/user_custs1_def.h`:
+  - Define 128-bit UUIDs for:
+    - Pipeline service
+    - Control point characteristic
+    - Status characteristic
+  - Define characteristic lengths:
+    - control point: chunk frame payload for one ATT write
+    - status: 1 byte
+  - Define the `enum` of `CUSTS1` attribute indices, including the status CCCD.
+
+- [ ] Create `firmware/app/src/user_custs1_def.c`:
+  - Build the `attm_desc_128` table for one service with:
+    - primary service declaration
+    - control-point declaration + value
+    - status declaration + value + CCCD
+  - Export the table in the format required by `struct cust_prf_func_callbacks`.
+
+- [ ] Choose the exact UUID constants once and reuse them in:
+  - `firmware/app/include/user_custs1_def.h`
+  - website `flow-ble-upload.js` from Task 13
+  - any documentation that still uses placeholder UUIDs
+
+### Step 3: Add CUSTS1 handlers and route writes to the pipeline service
+
+- [ ] Create `firmware/app/include/user_custs1_impl.h`:
+  - Declare handlers for:
+    - `CUSTS1_VAL_WRITE_IND`
+    - `CUSTS1_ATT_INFO_REQ`
+    - `CUSTS1_VAL_NTF_CFM` if the status path needs completion tracking
+  - Declare helpers for:
+    - control-point handle lookup
+    - status handle lookup
+    - status subscription state
+
+- [ ] Create `firmware/app/src/user_custs1_impl.c`:
+  - Define `cust_prf_funcs[]` with one entry for `TASK_ID_CUSTS1`, pointing at:
+    - the `user_custs1_att_db`
+    - the create-db callback
+    - the enable callback
+    - any init / write-validation callback required by the SDK
+  - Implement a `CUSTS1_VAL_WRITE_IND` handler that:
+    - checks whether `param->handle` is the pipeline control-point handle
+    - forwards `param->value` / `param->length` to `pp_pipeline_service_on_write()`
+    - tracks CCCD writes for the status characteristic
+  - Implement a minimal `CUSTS1_ATT_INFO_REQ` handler so value writes and CCCD writes are accepted by the SDK.
+  - Implement a helper that sends `CUSTS1_VAL_NTF_REQ` for the status characteristic when notifications are enabled.
+
+### Step 4: Register and dispatch the custom service in the app
+
+- [ ] Modify `firmware/config/user_callback_config.h`:
+  - Add a `user_prf_funcs[]` entry for `TASK_ID_CUSTS1` so `app_db_init_next()` creates the custom DB and `app_prf_enable()` enables it on connection.
+  - Include `user_custs1_impl.h` if needed for the handler declarations.
+
+- [ ] Modify `firmware/app/src/paddling_pulse_app.c`:
+  - In `user_catch_rest_hndl()`, handle:
+    - `CUSTS1_VAL_WRITE_IND`
+    - `CUSTS1_ATT_INFO_REQ`
+    - `CUSTS1_VAL_NTF_CFM` if used
+  - Forward those messages to the helpers in `user_custs1_impl.c`.
+  - Do not depend on raw `GATTC_EVENT_*` indications for server-side writes; the OTA upload path must come through `CUSTS1`.
+
+### Step 5: Push status changes over BLE notifications
+
+- [ ] Modify `firmware/app/include/pp_pipeline_service.h`:
+  - Add a helper that centralizes status changes, for example:
+    - `void pp_pipeline_service_set_status(uint8_t status);`
+  - Keep `pp_pipeline_service_status()` for direct reads.
+
+- [ ] Modify `firmware/app/src/pp_pipeline_service.c`:
+  - Replace direct writes to the local status byte with one helper that:
+    - updates the stored status
+    - asks `user_custs1_impl.c` to notify the status characteristic if the peer subscribed
+  - Emit notifications for:
+    - `PP_SVC_STATUS_RECEIVING`
+    - `PP_SVC_STATUS_VALID_RESET`
+    - each terminal error code
+  - Preserve the pure logic entry point `pp_pipeline_service_on_write()` so host-side unit tests can still exercise the state machine without the SDK.
+
+### Step 6: Build and test the BLE glue
+
+- [ ] Modify `Makefile`:
+  - Add `firmware/app/src/user_custs1_def.c` and `firmware/app/src/user_custs1_impl.c` to `SOURCES`.
+
+- [ ] Modify `tests/test_pp_pipeline_service.c`:
+  - Keep the existing direct state-machine tests.
+  - Add a pure-C test seam for one or both of:
+    - handle classification
+    - notification gating when CCCD is enabled/disabled
+  - Do not attempt to unit-test full SDK message passing in the host test binary; verify the integration through the firmware build.
+
+- [ ] Run: `cd tests && mingw32-make test_pp_pipeline_service`
+- [ ] Expected: PASS
+
+- [ ] Run: `mingw32-make clean && mingw32-make`
+- [ ] Expected: firmware still builds and links with `CUSTS1` enabled
+
+### Step 7: Commit
+
+- [ ] ```bash
+git add firmware/app/include/user_custs_config.h firmware/app/include/user_custs1_def.h \
+      firmware/app/include/user_custs1_impl.h firmware/app/src/user_custs1_def.c \
+      firmware/app/src/user_custs1_impl.c firmware/config/user_modules_config.h \
+      firmware/config/user_profiles_config.h firmware/config/user_callback_config.h \
+      firmware/app/include/pp_pipeline_service.h firmware/app/src/pp_pipeline_service.c \
+      firmware/app/src/paddling_pulse_app.c Makefile tests/test_pp_pipeline_service.c
+git commit -m "feat: expose OTA pipeline service over CUSTS1 with write routing and status notifications"
+```
+
+---
+
 ## Dependency Graph
 
 ```
 Task 1 (block interface + representation)
-  ├─→ Task 2 (pretraitement)
-  ├─→ Task 3 (estimation)
-  ├─→ Task 4 (detection)
-  └─→ Task 5 (validation + suivi)
-        │
-Task 6 (protocol) ──────────────┐
-        │                        │
-Task 7 (graph executor) ←───────┘
-        │
-Task 8 (storage) ───────────────┐
-        │                        │
-Task 9 (source blocks) ─────────┤
-        │                        │
-Task 10 (BLE service) ──────────┤
-        │                        │
-Task 11 (firmware integration) ←┘
-        │
-Task 12 (flow compiler) ← Task 6
-        │
-Task 13 (BLE upload) ← Task 12
-        │
-Task 14 (WASM build) ← Task 1-5
-        │
-Task 15 (end-to-end test) ← all
+  -> Task 2 (pretraitement)
+  -> Task 3 (estimation)
+  -> Task 4 (detection)
+  -> Task 5 (validation + suivi)
+
+Task 6 (protocol) -> Task 7 (graph executor)
+Task 8 (storage) -> Task 11 (firmware integration)
+Task 9 (source blocks) -> Task 11 (firmware integration)
+Task 10 (BLE service logic) -> Task 10A (CUSTS1 glue) -> Task 11 (firmware integration)
+Task 12 (flow compiler) -> Task 13 (BLE upload)
+Task 14 (WASM build) -> depends on Tasks 1-5
+Task 15 (end-to-end test) -> depends on all firmware/runtime tasks
 ```
 
-**Parallelizable:** Tasks 2, 3, 4 can run in parallel after Task 1. Tasks 12, 14 can run in parallel with Tasks 10, 11.
+**Parallelizable:** Tasks 2, 3, and 4 can run in parallel after Task 1. Tasks 12 and 14 can run in parallel with Tasks 10, 10A, and 11 once the firmware-side interfaces are stable.
