@@ -58,6 +58,9 @@
 #include "pp_storage.h"
 #include "co_bt.h"
 #include "app_cscps.h"
+#include "custs1_task.h"
+#include "user_custs1_def.h"
+#include "user_custs1_impl.h"
 
 
 /*
@@ -536,6 +539,7 @@ void user_app_init(void)
     
     default_app_on_init();
     paddling_pulse_console_init();
+    pp_custs1_reset_state();
     pp_pipeline_service_init();
     paddling_pulse_pipeline_init();
 }
@@ -621,6 +625,7 @@ void user_app_disconnect(struct gapc_disconnect_ind const *param)
 #endif
 
     app_connection_idx = GAP_INVALID_CONIDX;
+    pp_custs1_reset_state();
 
 #ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
     paddling_pulse_console_printf("BLE: disconnect h=%u\r\n", param->conhdl);
@@ -659,6 +664,30 @@ void user_catch_rest_hndl(ke_msg_id_t const msgid,
 
     switch(msgid)
     {
+        case CUSTS1_VAL_WRITE_IND:
+        {
+            const struct custs1_val_write_ind *ind =
+                (const struct custs1_val_write_ind *)param;
+            if (pp_custs1_is_ctrl_handle(ind->handle))
+            {
+                user_custs1_ctrl_wr_handler(msgid, param, dest_id, src_id);
+            }
+            else if (pp_custs1_is_status_ntf_cfg_handle(ind->handle))
+            {
+                user_custs1_status_ntf_cfg_handler(msgid, param, dest_id, src_id);
+            }
+        } break;
+
+        case CUSTS1_ATT_INFO_REQ:
+        {
+            user_custs1_att_info_handler(msgid, param, dest_id, src_id);
+        } break;
+
+        case CUSTS1_VAL_NTF_CFM:
+        {
+            (void)param;
+        } break;
+
         case GAPC_PARAM_UPDATED_IND:
         {
             (void)param;
@@ -666,7 +695,6 @@ void user_catch_rest_hndl(ke_msg_id_t const msgid,
 
         case GATTC_EVENT_REQ_IND:
         {
-            // Confirm unhandled indication to avoid GATT timeout
             struct gattc_event_ind const *ind = (struct gattc_event_ind const *) param;
             struct gattc_event_cfm *cfm = KE_MSG_ALLOC(GATTC_EVENT_CFM, src_id, dest_id, gattc_event_cfm);
             cfm->handle = ind->handle;

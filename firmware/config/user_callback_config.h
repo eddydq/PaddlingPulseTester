@@ -53,6 +53,7 @@
 #include "paddling_pulse_imu_polar.h"
 #endif
 #include "app_cscps.h"
+#include "user_custs1_impl.h"
 
 /*
  * LOCAL VARIABLE DEFINITIONS

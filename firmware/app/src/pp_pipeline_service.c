@@ -5,13 +5,26 @@
 #include "pp_protocol.h"
 #include "pp_storage.h"
 
+#ifndef PP_TARGET_TEST
+#include "user_custs1_impl.h"
+#endif
+
 static uint8_t s_status;
 static uint8_t s_expected_seq;
 static uint16_t s_rx_len;
 
-static void reset_transfer(uint8_t status)
+void pp_pipeline_service_set_status(uint8_t status)
 {
     s_status = status;
+
+#ifndef PP_TARGET_TEST
+    pp_custs1_send_status_ntf(status);
+#endif
+}
+
+static void reset_transfer(uint8_t status)
+{
+    pp_pipeline_service_set_status(status);
     s_expected_seq = 0;
     s_rx_len = 0;
 }
@@ -81,7 +94,7 @@ void pp_pipeline_service_on_write(const uint8_t *data, uint16_t len)
         pp_storage_begin_pipeline_write();
         s_expected_seq = 0;
         s_rx_len = 0;
-        s_status = PP_SVC_STATUS_RECEIVING;
+        pp_pipeline_service_set_status(PP_SVC_STATUS_RECEIVING);
     }
 
     if (s_status != PP_SVC_STATUS_RECEIVING || seq != s_expected_seq) {
@@ -105,5 +118,5 @@ void pp_pipeline_service_on_write(const uint8_t *data, uint16_t len)
     }
 
     s_expected_seq++;
-    s_status = PP_SVC_STATUS_RECEIVING;
+    pp_pipeline_service_set_status(PP_SVC_STATUS_RECEIVING);
 }

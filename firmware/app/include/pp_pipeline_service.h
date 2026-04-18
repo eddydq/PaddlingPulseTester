@@ -19,5 +19,6 @@
 void pp_pipeline_service_init(void);
 void pp_pipeline_service_on_write(const uint8_t *data, uint16_t len);
 uint8_t pp_pipeline_service_status(void);
+void pp_pipeline_service_set_status(uint8_t status);
 
 #endif /* PP_PIPELINE_SERVICE_H */

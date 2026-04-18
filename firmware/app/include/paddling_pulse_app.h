@@ -113,6 +113,8 @@ void user_app_on_get_dev_appearance(uint16_t *appearance);
  * @brief Application initialization function.
  ****************************************************************************************
 */
+extern uint8_t app_connection_idx;
+
 void user_app_init(void);
 
 /**
