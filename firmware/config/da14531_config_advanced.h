@@ -95,7 +95,7 @@
 // #define DB_HEAP_SZ              1024
 // #define ENV_HEAP_SZ             4928
 // #define MSG_HEAP_SZ             6880
-// #define NON_RET_HEAP_SZ         2048
+#define NON_RET_HEAP_SZ         1280
 
 /****************************************************************************************************************/
 /* NVDS configuration                                                                                           */
@@ -128,7 +128,7 @@
 /****************************************************************************************************************/
 /* Enables the BLE statistics measurement feature.                                                              */
 /****************************************************************************************************************/
-#define CFG_BLE_METRICS
+#undef CFG_BLE_METRICS
 
 /****************************************************************************************************************/
 /* Output the Hardfault arguments to serial/UART interface.                                                     */
@@ -145,7 +145,7 @@
 /*             supportedMaxTxTime = (supportedMaxTxOctets + 11 + 3 ) * 8                                        */
 /*         Range: 328 - 2120 usec.                                                                              */
 /****************************************************************************************************************/
-#define CFG_MAX_TX_PACKET_LENGTH        (251)
+#define CFG_MAX_TX_PACKET_LENGTH        (69)
 
 /****************************************************************************************************************/
 /* Maximum supported RX data packet length (supportedMaxRxOctets value, as defined in 4.2 Specification).       */
@@ -157,7 +157,7 @@
 /*             supportedMaxRxTime = (supportedMaxRxOctets + 11 + 3 ) * 8                                        */
 /*         Range: 328 - 2120 usec.                                                                              */
 /****************************************************************************************************************/
-#define CFG_MAX_RX_PACKET_LENGTH        (251)
+#define CFG_MAX_RX_PACKET_LENGTH        (69)
 
 /****************************************************************************************************************/
 /* Select external application/host transport layer:                                                            */
@@ -195,12 +195,12 @@
 /* Maximum retention memory in bytes. The base address of the retention data is calculated from the selected    */
 /* size.                                                                                                        */
 /****************************************************************************************************************/
-#define CFG_RET_DATA_SIZE    (2048)
+#define CFG_RET_DATA_SIZE    (2256)
 
 /****************************************************************************************************************/
 /* Maximum uninitialized retained data required by the application.                                             */
 /****************************************************************************************************************/
-#define CFG_RET_DATA_UNINIT_SIZE (0)
+#define CFG_RET_DATA_UNINIT_SIZE (12)
 
 /****************************************************************************************************************/
 /* RAM cell(s) retention mode handling. The user has to select which RAM cells must be retained during the      */

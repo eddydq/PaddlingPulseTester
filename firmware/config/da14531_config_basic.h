@@ -69,7 +69,11 @@
 /* should be set to 1 for optimizing memory utilization.                                                        */
 /*      - MAX value for DA14531: 3                                                                              */
 /****************************************************************************************************************/
-#define CFG_MAX_CONNECTIONS     (1)
+#ifdef CFG_IMU_POLAR
+#define CFG_MAX_CONNECTIONS     (2)
+#else
+#define CFG_MAX_CONNECTIONS     (2)
+#endif
 
 /****************************************************************************************************************/
 /* Enables development/debug mode. For production mode builds it must be disabled.                              */
@@ -87,7 +91,7 @@
 /****************************************************************************************************************/
 /* Console mode: single-wire UART now, AT command support later.                                                */
 /****************************************************************************************************************/
-#define CFG_PADDLING_PULSE_CONSOLE_MODE
+#undef CFG_PADDLING_PULSE_CONSOLE_MODE
 
 #if defined(CFG_PADDLING_PULSE_CONSOLE_MODE)
     #define CFG_PADDLING_PULSE_AT_COMMANDS
@@ -111,6 +115,20 @@
     #define CFG_UART_ONE_WIRE_SUPPORT
 #endif
 
+
+/****************************************************************************************************************/
+/* IMU source selection — exactly one must be defined.                                                          */
+/****************************************************************************************************************/
+// define CFG_IMU_LIS3DH
+// #define CFG_IMU_MPU6050
+#define CFG_IMU_POLAR
+
+/****************************************************************************************************************/
+/* IMU axis selection — exactly one must be defined.                                                            */
+/****************************************************************************************************************/
+// #define CFG_IMU_AXIS_X
+// #define CFG_IMU_AXIS_Y
+#define CFG_IMU_AXIS_Z
 
 /****************************************************************************************************************/
 /* Select external memory device for data storage                                                               */

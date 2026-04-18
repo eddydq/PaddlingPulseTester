@@ -68,6 +68,22 @@
 /* Advertising data update timer */
 #define APP_ADV_DATA_UPDATE_TO              (3000)   // 3000*10ms = 30sec, The maximum allowed value is 41943sec (4194300 * 10ms)
 
+/* CSC measurement notification timer */
+#define APP_CSC_MEAS_NTF_TO                 (100)    // 100*10ms = 1sec
+
+/* IMU FIFO drain timer */
+#define APP_IMU_PROCESS_TO                  (25)     // 25*10ms = 250ms
+
+/* Stroke rate update timer (derived from algorithm tunable) */
+#include "paddling_pulse_stroke_rate.h"
+#define APP_STROKE_RATE_TO                  (PP_STROKE_RATE_INTERVAL_MS / 10)
+
+/* Cycling cadence sensor appearance */
+#define APP_CSCP_DEVICE_APPEARANCE          (0x0484)
+
+/* Default simulated cadence until a real stroke source is connected */
+#define APP_CSCP_DEFAULT_CADENCE_RPM        (60)
+
 /* Manufacturer specific data constants */
 #define APP_AD_MSD_COMPANY_ID               (0xABCD)
 #define APP_AD_MSD_COMPANY_ID_LEN           (2)
@@ -86,10 +102,27 @@ void user_on_cscps_cfg_ntfind_ind(uint8_t conidx, const struct cscps_cfg_ntfind_
 
 /**
  ****************************************************************************************
+ * @brief Returns the device appearance as a cycling cadence sensor.
+ * @param[in,out] appearance Pointer to the GAP appearance value.
+ ****************************************************************************************
+*/
+void user_app_on_get_dev_appearance(uint16_t *appearance);
+
+/**
+ ****************************************************************************************
  * @brief Application initialization function.
  ****************************************************************************************
 */
+extern uint8_t app_connection_idx;
+
 void user_app_init(void);
+
+/**
+ ****************************************************************************************
+ * @brief Load the stored OTA pipeline or build the default graph.
+ ****************************************************************************************
+*/
+void paddling_pulse_pipeline_init(void);
 
 /**
  ****************************************************************************************

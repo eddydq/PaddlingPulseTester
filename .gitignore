@@ -1,3 +1,10 @@
 build/
 config/local.mk
 config/local/
+.claude/
+.superpowers/
+.worktrees/
+__pycache__/
+*/logs/
+*/results/
+/tests/*.exe

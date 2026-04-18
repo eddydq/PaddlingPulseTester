@@ -61,14 +61,41 @@ Broche UART single-wire actuelle :
 - `P0_5` à 115200 de baud rate.
 
 
-## Commandes AT actuelles
+## Compile-Time Configuration
 
-La console supporte actuellement :
+### IMU Source (`da14531_config_basic.h`)
+| Define | Sensor | Interface | Rate |
+|--------|--------|-----------|------|
+| `CFG_IMU_LIS3DH` | LIS3DH | I2C P0_8/P0_9 | 100 Hz |
+| `CFG_IMU_MPU6050` | MPU6050 | I2C P0_8/P0_9 | 100 Hz |
+| `CFG_IMU_POLAR` | Polar Verity Sense | BLE central | 52 Hz |
 
-- `AT+BATT`
-- `AT+IOCFG`
+### Axis Selection (`da14531_config_basic.h`)
+`CFG_IMU_AXIS_X`, `CFG_IMU_AXIS_Y`, or `CFG_IMU_AXIS_Z`
 
-`AT+IOCFG` est en lecture seule pour le moment et retourne l'affectation fixe des broches de la carte.
+### New Source Files
+| File | Purpose |
+|------|---------|
+| `paddling_pulse_sample_store.c/h` | 512-sample circular buffer |
+| `paddling_pulse_stroke_rate.c/h` | Autocorrelation + Kalman filter |
+| `paddling_pulse_imu.h` | Compile-time driver dispatch |
+| `paddling_pulse_imu_lis3dh.c/h` | LIS3DH I2C driver |
+| `paddling_pulse_imu_mpu6050.c/h` | MPU6050 I2C driver |
+| `paddling_pulse_imu_polar.c/h` | Polar BLE PMD client |
+
+### AT Console Commands (`CFG_PADDLING_PULSE_CONSOLE_MODE`)
+| Command | Description |
+|---------|-------------|
+| `AT+CAD` | Query current cadence RPM |
+| `AT+CAD=<n>` | Set manual cadence override (0-255) |
+| `AT+IMU` | Query IMU status |
+| `AT+BATT` | Query battery level |
+| `AT+IOCFG` | Query GPIO pin assignments |
+
+### Stroke Rate Tuning (`paddling_pulse_stroke_rate.h`)
+All parameters are `#ifndef`-guarded and can be overridden in
+`da14531_config_basic.h`. See the header file for the full list and
+default values.
 
 ## Périmètre
 

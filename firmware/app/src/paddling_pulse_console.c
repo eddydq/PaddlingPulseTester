@@ -15,6 +15,10 @@
 #include "ke_msg.h"
 #include "paddling_pulse_board.h"
 #include "paddling_pulse_console.h"
+#include "paddling_pulse_console_io.h"
+#include "paddling_pulse_imu.h"
+#include "paddling_pulse_sample_store.h"
+#include "paddling_pulse_stroke_rate.h"
 #include "uart.h"
 
 #if defined(CFG_PADDLING_PULSE_AT_COMMANDS)
@@ -48,14 +52,7 @@ static void paddling_pulse_console_arm_rx(void)
 
 static void paddling_pulse_console_send_reply(const char *reply)
 {
-#if defined(CFG_UART_ONE_WIRE_SUPPORT)
-    uart_one_wire_tx_en(UART1);
-#endif
-    uart_send(UART1, (const uint8_t *)reply, (uint16_t)strlen(reply), UART_OP_BLOCKING);
-    uart_wait_tx_finish(UART1);
-#if defined(CFG_UART_ONE_WIRE_SUPPORT)
-    uart_one_wire_rx_en(UART1);
-#endif
+    paddling_pulse_console_write(reply);
 }
 
 static void paddling_pulse_console_reset_input(void)
@@ -174,6 +171,68 @@ static void paddling_pulse_console_reply_iocfg(void)
     paddling_pulse_console_send_reply(reply);
 }
 
+extern uint8_t current_cadence_rpm;
+extern bool csc_meas_ntf_enabled;
+extern bool imu_active;
+
+static bool paddling_pulse_console_match_set(const char *command,
+                                             const char *token,
+                                             const char **arg)
+{
+    while (*command && *token)
+    {
+        if (paddling_pulse_console_upper(*command) != paddling_pulse_console_upper(*token))
+            return false;
+        command++;
+        token++;
+    }
+    if (*token) return false;
+    if (*command == '=')
+    {
+        *arg = command + 1;
+        return true;
+    }
+    return false;
+}
+
+static void paddling_pulse_console_reply_cad(void)
+{
+    char reply[PADDLING_PULSE_CONSOLE_REPLY_MAX_LEN];
+    uint8_t algo_rpm = pp_stroke_rate_get_rpm();
+    snprintf(reply, sizeof(reply),
+             "\r\n+CAD:%u,algo=%u\r\nOK\r\n",
+             current_cadence_rpm, algo_rpm);
+    paddling_pulse_console_send_reply(reply);
+}
+
+static void paddling_pulse_console_set_cad(const char *arg)
+{
+    int val = 0;
+    while (*arg >= '0' && *arg <= '9')
+    {
+        val = val * 10 + (*arg - '0');
+        arg++;
+    }
+    if (val > 255) val = 255;
+    current_cadence_rpm = (uint8_t)val;
+
+    char reply[PADDLING_PULSE_CONSOLE_REPLY_MAX_LEN];
+    snprintf(reply, sizeof(reply), "\r\nOK\r\n");
+    paddling_pulse_console_send_reply(reply);
+}
+
+static void paddling_pulse_console_reply_imu(void)
+{
+    char reply[PADDLING_PULSE_CONSOLE_REPLY_MAX_LEN];
+    snprintf(reply, sizeof(reply),
+             "\r\n+IMU:%s,running=%u,samples=%u,rate=%uHz\r\nOK\r\n",
+             pp_imu_get_name(),
+             imu_active ? pp_imu_is_running() : 0,
+             pp_sample_store_get_count(),
+             pp_sample_store_get_rate_hz());
+    paddling_pulse_console_send_reply(reply);
+}
+
 static void paddling_pulse_console_process(char *command, bool overflow)
 {
     paddling_pulse_console_trim(command);
@@ -193,6 +252,25 @@ static void paddling_pulse_console_process(char *command, bool overflow)
     if (paddling_pulse_console_match_query(command, "AT+IOCFG"))
     {
         paddling_pulse_console_reply_iocfg();
+        return;
+    }
+
+    const char *arg = NULL;
+    if (paddling_pulse_console_match_set(command, "AT+CAD", &arg))
+    {
+        paddling_pulse_console_set_cad(arg);
+        return;
+    }
+
+    if (paddling_pulse_console_match_query(command, "AT+CAD"))
+    {
+        paddling_pulse_console_reply_cad();
+        return;
+    }
+
+    if (paddling_pulse_console_match_query(command, "AT+IMU"))
+    {
+        paddling_pulse_console_reply_imu();
         return;
     }
 

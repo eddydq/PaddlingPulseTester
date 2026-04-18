@@ -101,6 +101,12 @@ SOURCES := \
 	sdk/app_modules/src/app_diss/app_diss_task.c \
 	sdk/app_modules/src/app_cscp/app_cscps.c \
 	sdk/app_modules/src/app_cscp/app_cscps_task.c \
+	sdk/app_modules/src/app_custs/app_customs.c \
+	sdk/app_modules/src/app_custs/app_customs_common.c \
+	sdk/app_modules/src/app_custs/app_customs_task.c \
+	sdk/ble_stack/profiles/custom/custs/src/custs1.c \
+	sdk/ble_stack/profiles/custom/custs/src/custs1_task.c \
+	sdk/ble_stack/profiles/custom/custom_common.c \
 	sdk/app_modules/src/app_bond_db/app_bond_db.c \
 	sdk/app_modules/src/app_common/app_utils.c \
 	sdk/app_modules/src/app_easy/app_easy_whitelist.c \
@@ -109,6 +115,26 @@ SOURCES := \
 	firmware/app/src/paddling_pulse_board.c \
 	firmware/app/src/paddling_pulse_app.c \
 	firmware/app/src/paddling_pulse_console.c \
+	firmware/app/src/paddling_pulse_console_io.c \
+	firmware/app/src/paddling_pulse_sample_store.c \
+	firmware/app/src/paddling_pulse_stroke_rate.c \
+	firmware/app/src/paddling_pulse_imu_lis3dh.c \
+	firmware/app/src/paddling_pulse_imu_mpu6050.c \
+	firmware/app/src/paddling_pulse_imu_polar.c \
+	firmware/app/src/pp_block.c \
+	firmware/app/src/pp_block_source.c \
+	firmware/app/src/pp_block_representation.c \
+	firmware/app/src/pp_block_pretraitement.c \
+	firmware/app/src/pp_block_estimation.c \
+	firmware/app/src/pp_block_detection.c \
+	firmware/app/src/pp_block_validation.c \
+	firmware/app/src/pp_block_suivi.c \
+	firmware/app/src/pp_protocol.c \
+	firmware/app/src/pp_graph.c \
+	firmware/app/src/pp_storage.c \
+	firmware/app/src/pp_pipeline_service.c \
+	firmware/app/src/user_custs1_def.c \
+	firmware/app/src/user_custs1_impl.c \
 	sdk/platform/arch/boot/system_DA14531.c \
 	sdk/platform/arch/boot/startup_DA14531.c \
 	sdk/platform/arch/main/hardfault_handler.c \
@@ -294,7 +320,7 @@ INCLUDE_DIRS := \
 	sdk/platform/utilities/otp_hdr \
 	sdk/platform/include/CMSIS/5.9.0/CMSIS/Core/Include
 
-DEFINES := __DA14531__ __MICROLIB ARMCM0P
+DEFINES := __DA14531__ __MICROLIB ARMCM0P STACK_SIZE=0x600
 FORCED_INCLUDES := da14531_config_basic.h da14531_config_advanced.h user_config.h
 
 resolve-path = $(if $(filter firmware firmware/%,$(1)),$(REPO_ROOT)/$(1),$(SDK_ROOT_NORM)/$(1))
