@@ -7,7 +7,7 @@
 
 #include "da14531_config_basic.h"
 
-#ifdef CFG_IMU_POLAR
+#if defined(CFG_IMU_POLAR) || defined(CFG_IMU_DUAL)
 
 #include "paddling_pulse_imu_polar.h"
 #include "paddling_pulse_sample_store.h"
@@ -28,8 +28,40 @@
 #include "paddling_pulse_console_io.h"
 #endif
 #include "paddling_pulse_imu_polar_logic.h"
+#ifdef CFG_IMU_DUAL
+#include "paddling_pulse_imu_manager.h"
+#include "paddling_pulse_imu_polar_rssi.h"
+#endif
 #include "user_config.h"
 #include <string.h>
+
+/*
+ * Arm-mounted accelerometer tuning. Arm swing amplitudes are larger than
+ * boat swing, so the window and energy floor are adjusted accordingly.
+ */
+const pp_stroke_rate_params_t pp_imu_polar_params = {
+#if defined(CFG_IMU_AXIS_X)
+    .axis = PP_AXIS_X,
+#elif defined(CFG_IMU_AXIS_Y)
+    .axis = PP_AXIS_Y,
+#else
+    .axis = PP_AXIS_Z,
+#endif
+    .sample_rate_hz               = PP_STROKE_RATE_DEFAULT_POLAR_HZ,
+    .window_samples               = PP_STROKE_RATE_WINDOW_POLAR,
+    .min_rpm                      = PP_STROKE_RATE_MIN_RPM,
+    .max_rpm                      = PP_STROKE_RATE_MAX_RPM,
+    .kalman_q                     = PP_KALMAN_Q,
+    .kalman_r                     = PP_KALMAN_R,
+    .kalman_p_max                 = PP_KALMAN_P_MAX,
+    .autocorr_confidence_min      = PP_AUTOCORR_CONFIDENCE_MIN,
+    .autocorr_energy_min          = PP_AUTOCORR_ENERGY_MIN * PP_STROKE_RATE_POLAR_ENERGY_SCALE,
+    .autocorr_harmonic_pct        = PP_AUTOCORR_HARMONIC_PCT,
+    .kalman_confirm_tolerance_rpm = PP_KALMAN_CONFIRM_TOLERANCE_RPM,
+    .kalman_max_jump_rpm          = PP_KALMAN_MAX_JUMP_RPM,
+    .kalman_invalid_max           = PP_KALMAN_INVALID_MAX,
+    .kalman_confirm_count         = PP_KALMAN_CONFIRM_COUNT,
+};
 
 /*
  * CONSTANTS
@@ -277,6 +309,11 @@ static timer_hnd s_scan_retry_timer __SECTION_ZERO("retention_mem_area0");
 static bool s_stop_cancel_pending __SECTION_ZERO("retention_mem_area0");
 static bool s_retry_cancel_pending __SECTION_ZERO("retention_mem_area0");
 
+#ifdef CFG_IMU_DUAL
+static pp_polar_rssi_picker_t s_picker;
+static timer_hnd s_rssi_window_timer;
+#endif
+
 /*
  * FORWARD DECLARATIONS
  */
@@ -284,6 +321,9 @@ static void polar_clear_handles(void);
 static void polar_reset(void);
 static void polar_retry_if_needed(void);
 static void polar_disconnect_setup_error(void);
+#ifdef CFG_IMU_DUAL
+static void rssi_window_cb(void);
+#endif
 
 /*
  * GATT HELPERS
@@ -415,6 +455,15 @@ static void polar_start_scan(void)
     s_polar.state = POLAR_SCANNING;
     polar_log("scan start");
 
+#ifdef CFG_IMU_DUAL
+    pp_polar_rssi_picker_init(&s_picker);
+    if (s_rssi_window_timer != EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(s_rssi_window_timer);
+    }
+    s_rssi_window_timer = app_easy_timer(PP_POLAR_RSSI_WINDOW_MS, rssi_window_cb);
+#endif
+
     struct gapm_start_scan_cmd *cmd = KE_MSG_ALLOC(
         GAPM_START_SCAN_CMD, TASK_GAPM, TASK_APP, gapm_start_scan_cmd);
     cmd->op.code     = GAPM_SCAN_ACTIVE;
@@ -500,16 +549,39 @@ static int32_t polar_parse_signed_bits(const uint8_t *data,
     return val;
 }
 
+static int16_t polar_clamp_sample(int32_t value)
+{
+    if (value > INT16_MAX)
+    {
+        return INT16_MAX;
+    }
+    if (value < INT16_MIN)
+    {
+        return INT16_MIN;
+    }
+    return (int16_t)value;
+}
+
 static void polar_store_sample(int32_t x, int32_t y, int32_t z)
 {
     int16_t sample;
-#if defined(CFG_IMU_AXIS_X)
-    sample = (x > 32767) ? 32767 : (x < -32768) ? -32768 : (int16_t)x;
-#elif defined(CFG_IMU_AXIS_Y)
-    sample = (y > 32767) ? 32767 : (y < -32768) ? -32768 : (int16_t)y;
-#elif defined(CFG_IMU_AXIS_Z)
-    sample = (z > 32767) ? 32767 : (z < -32768) ? -32768 : (int16_t)z;
-#endif
+
+    switch (pp_imu_polar_params.axis)
+    {
+    case PP_AXIS_X:
+        sample = polar_clamp_sample(x);
+        break;
+
+    case PP_AXIS_Y:
+        sample = polar_clamp_sample(y);
+        break;
+
+    case PP_AXIS_Z:
+    default:
+        sample = polar_clamp_sample(z);
+        break;
+    }
+
     pp_sample_store_push(sample);
 }
 
@@ -610,7 +682,7 @@ static void polar_handle_cp_event(const uint8_t *value, uint16_t length)
     {
         memset(&parsed, 0, sizeof(parsed));
         s_polar.acc_selected_tlvs_len = 0;
-        s_polar.acc_sample_rate_hz = 52;
+        s_polar.acc_sample_rate_hz = PP_STROKE_RATE_DEFAULT_POLAR_HZ;
 
         /* Parse settings from response params */
         if ((length > 5) &&
@@ -634,6 +706,21 @@ static void polar_handle_cp_event(const uint8_t *value, uint16_t length)
     {
         polar_log_state_change(s_polar.state, POLAR_STREAMING, "streaming");
         s_polar.state = POLAR_STREAMING;
+
+#ifdef CFG_IMU_DUAL
+        pp_imu_manager_on_event(PP_IMU_EV_POLAR_STREAMING);
+#endif
+
+#ifndef CFG_IMU_DUAL
+        {
+            uint16_t actual_rate_hz = pp_imu_polar_get_actual_sample_rate_hz();
+            if (actual_rate_hz != pp_sample_store_get_rate_hz())
+            {
+                pp_sample_store_init(actual_rate_hz);
+                pp_stroke_rate_init(&pp_imu_polar_params);
+            }
+        }
+#endif
     }
     else
     {
@@ -888,6 +975,13 @@ static void polar_reset(void)
         app_easy_timer_cancel(s_scan_retry_timer);
         s_scan_retry_timer = EASY_TIMER_INVALID_TIMER;
     }
+#ifdef CFG_IMU_DUAL
+    if (s_rssi_window_timer != EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(s_rssi_window_timer);
+        s_rssi_window_timer = EASY_TIMER_INVALID_TIMER;
+    }
+#endif
     memset(&s_polar, 0, sizeof(s_polar));
     s_polar.conidx = GAP_INVALID_CONIDX;
     s_polar.conhdl = GAP_INVALID_CONHDL;
@@ -971,6 +1065,16 @@ bool pp_imu_polar_is_running(void)
     return (s_polar.state == POLAR_STREAMING);
 }
 
+uint16_t pp_imu_polar_get_actual_sample_rate_hz(void)
+{
+    if (s_polar.acc_sample_rate_hz == 0u)
+    {
+        return PP_STROKE_RATE_DEFAULT_POLAR_HZ;
+    }
+
+    return s_polar.acc_sample_rate_hz;
+}
+
 /*
  * BLE CALLBACKS
  */
@@ -980,6 +1084,12 @@ void pp_imu_polar_on_adv_report(struct gapm_adv_report_ind const *param)
 
     if (polar_is_verity_sense(param->report.data, param->report.data_len))
     {
+#ifdef CFG_IMU_DUAL
+        pp_polar_rssi_picker_add(&s_picker,
+                                 param->report.adv_addr.addr,
+                                 param->report.adv_addr_type,
+                                 param->report.rssi);
+#else
         memcpy(&s_polar.target_addr, &param->report.adv_addr,
                sizeof(struct bd_addr));
         s_polar.target_addr_type = param->report.adv_addr_type;
@@ -991,8 +1101,40 @@ void pp_imu_polar_on_adv_report(struct gapm_adv_report_ind const *param)
             GAPM_CANCEL_CMD, TASK_GAPM, TASK_APP, gapm_cancel_cmd);
         cmd->operation = GAPM_CANCEL;
         KE_MSG_SEND(cmd);
+#endif
     }
 }
+
+#ifdef CFG_IMU_DUAL
+static void rssi_window_cb(void)
+{
+    pp_polar_candidate_t best;
+
+    s_rssi_window_timer = EASY_TIMER_INVALID_TIMER;
+    if (s_polar.state != POLAR_SCANNING)
+    {
+        return;
+    }
+
+    if (!pp_polar_rssi_picker_best(&s_picker, &best))
+    {
+        pp_imu_manager_on_event(PP_IMU_EV_POLAR_SCAN_FAIL);
+        return;
+    }
+
+    memcpy(s_polar.target_addr.addr, best.addr, PP_POLAR_ADDR_LEN);
+    s_polar.target_addr_type = best.addr_type;
+    s_polar.state = POLAR_CONNECTING;
+    polar_log("adv match");
+
+    {
+        struct gapm_cancel_cmd *cmd = KE_MSG_ALLOC(
+            GAPM_CANCEL_CMD, TASK_GAPM, TASK_APP, gapm_cancel_cmd);
+        cmd->operation = GAPM_CANCEL;
+        KE_MSG_SEND(cmd);
+    }
+}
+#endif
 
 void pp_imu_polar_on_scan_complete(uint8_t status)
 {
@@ -1107,6 +1249,10 @@ bool pp_imu_polar_on_disconnect(uint16_t conhdl)
     if (!pp_polar_disconnect_is_owned(s_polar.conhdl, conhdl,
                                       s_polar.state == POLAR_IDLE))
         return false;
+
+#ifdef CFG_IMU_DUAL
+    pp_imu_manager_on_event(PP_IMU_EV_POLAR_DISCONNECT);
+#endif
 
     action = pp_polar_stop_completion_action(s_stop_cancel_pending);
     if (action == PP_POLAR_STOP_COMPLETION_RESET)
@@ -1261,4 +1407,4 @@ bool pp_imu_polar_handle_message(ke_msg_id_t msgid,
     return false;
 }
 
-#endif /* CFG_IMU_POLAR */
+#endif /* CFG_IMU_POLAR || CFG_IMU_DUAL */

@@ -13,6 +13,12 @@
 #ifndef PP_SAMPLE_STORE_CAPACITY
 #define PP_SAMPLE_STORE_CAPACITY  512
 #endif
+#ifndef PP_SAMPLE_STORE_MIN_RATE_HZ
+#define PP_SAMPLE_STORE_MIN_RATE_HZ  1
+#endif
+#ifndef PP_SAMPLE_STORE_MAX_RATE_HZ
+#define PP_SAMPLE_STORE_MAX_RATE_HZ  1000
+#endif
 
 /**
  * @brief Initialize the sample store and set the sampling rate.

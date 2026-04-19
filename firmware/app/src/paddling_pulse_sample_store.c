@@ -7,7 +7,14 @@
 
 #include "paddling_pulse_sample_store.h"
 #include <string.h>
+
+#if defined(__arm__) || defined(__ARMCC_VERSION)
 #include "arch.h"
+#endif
+
+#ifndef __SECTION_ZERO
+#define __SECTION_ZERO(name)
+#endif
 
 static struct {
     int16_t  samples[PP_SAMPLE_STORE_CAPACITY];

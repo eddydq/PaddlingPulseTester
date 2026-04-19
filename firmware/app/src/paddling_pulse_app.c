@@ -51,6 +51,12 @@
 #include "paddling_pulse_console.h"
 #include "paddling_pulse_console_io.h"
 #include "paddling_pulse_imu.h"
+#if defined(CFG_IMU_LIS3DH) || defined(CFG_IMU_MPU6050) || defined(CFG_IMU_DUAL)
+#include "paddling_pulse_imu_lis3dh.h"
+#endif
+#if defined(CFG_IMU_POLAR) || defined(CFG_IMU_DUAL)
+#include "paddling_pulse_imu_polar.h"
+#endif
 #include "paddling_pulse_sample_store.h"
 #include "paddling_pulse_stroke_rate.h"
 #include "co_bt.h"
@@ -284,12 +290,24 @@ static void csc_meas_timer_cb(void)
 
 static void pipeline_start(void)
 {
-#ifdef CFG_IMU_POLAR
-    pp_sample_store_init(52);
-#else
-    pp_sample_store_init(100);
+#if defined(CFG_IMU_DUAL)
+    pp_sample_store_init(PP_STROKE_RATE_DEFAULT_LIS3DH_HZ);
+    pp_stroke_rate_init(&pp_imu_lis3dh_params);
+#elif defined(CFG_IMU_LIS3DH)
+    const pp_stroke_rate_params_t *params = &pp_imu_lis3dh_params;
+    uint16_t rate_hz = params->sample_rate_hz;
+#elif defined(CFG_IMU_POLAR)
+    const pp_stroke_rate_params_t *params = &pp_imu_polar_params;
+    uint16_t rate_hz = params->sample_rate_hz;
+#elif defined(CFG_IMU_MPU6050)
+    const pp_stroke_rate_params_t *params = &pp_imu_lis3dh_params;
+    uint16_t rate_hz = params->sample_rate_hz;
 #endif
-    pp_stroke_rate_init();
+
+#if !defined(CFG_IMU_DUAL)
+    pp_sample_store_init(rate_hz);
+    pp_stroke_rate_init(params);
+#endif
 
     imu_active = pp_imu_init();
     if (imu_active)
@@ -380,7 +398,7 @@ void user_app_adv_start(void)
 
 void user_app_connection(const uint8_t conidx, struct gapc_connection_req_ind const *param)
 {
-#ifdef CFG_IMU_POLAR
+#if defined(CFG_IMU_POLAR) || defined(CFG_IMU_DUAL)
     /* Check if this is the Polar central-role connection */
     if (pp_imu_polar_on_connection(conidx, param))
     {
@@ -426,7 +444,7 @@ void user_app_adv_undirect_complete(uint8_t status)
 
 void user_app_disconnect(struct gapc_disconnect_ind const *param)
 {
-#ifdef CFG_IMU_POLAR
+#if defined(CFG_IMU_POLAR) || defined(CFG_IMU_DUAL)
     if (pp_imu_polar_on_disconnect(param->conhdl))
     {
         /* Polar connection dropped — driver handles retry internally */
@@ -459,7 +477,7 @@ void user_catch_rest_hndl(ke_msg_id_t const msgid,
         return;
     }
 
-#ifdef CFG_IMU_POLAR
+#if defined(CFG_IMU_POLAR) || defined(CFG_IMU_DUAL)
     if (pp_imu_polar_handle_message(msgid, param, dest_id, src_id))
     {
         return;
