@@ -28,6 +28,10 @@
 #include "paddling_pulse_console_io.h"
 #endif
 #include "paddling_pulse_imu_polar_logic.h"
+#ifdef CFG_IMU_DUAL
+#include "paddling_pulse_imu_manager.h"
+#include "paddling_pulse_imu_polar_rssi.h"
+#endif
 #include "user_config.h"
 #include <string.h>
 
@@ -305,6 +309,11 @@ static timer_hnd s_scan_retry_timer __SECTION_ZERO("retention_mem_area0");
 static bool s_stop_cancel_pending __SECTION_ZERO("retention_mem_area0");
 static bool s_retry_cancel_pending __SECTION_ZERO("retention_mem_area0");
 
+#ifdef CFG_IMU_DUAL
+static pp_polar_rssi_picker_t s_picker;
+static timer_hnd s_rssi_window_timer;
+#endif
+
 /*
  * FORWARD DECLARATIONS
  */
@@ -312,6 +321,9 @@ static void polar_clear_handles(void);
 static void polar_reset(void);
 static void polar_retry_if_needed(void);
 static void polar_disconnect_setup_error(void);
+#ifdef CFG_IMU_DUAL
+static void rssi_window_cb(void);
+#endif
 
 /*
  * GATT HELPERS
@@ -442,6 +454,15 @@ static void polar_start_scan(void)
     polar_clear_handles();
     s_polar.state = POLAR_SCANNING;
     polar_log("scan start");
+
+#ifdef CFG_IMU_DUAL
+    pp_polar_rssi_picker_init(&s_picker);
+    if (s_rssi_window_timer != EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(s_rssi_window_timer);
+    }
+    s_rssi_window_timer = app_easy_timer(PP_POLAR_RSSI_WINDOW_MS, rssi_window_cb);
+#endif
 
     struct gapm_start_scan_cmd *cmd = KE_MSG_ALLOC(
         GAPM_START_SCAN_CMD, TASK_GAPM, TASK_APP, gapm_start_scan_cmd);
@@ -948,6 +969,13 @@ static void polar_reset(void)
         app_easy_timer_cancel(s_scan_retry_timer);
         s_scan_retry_timer = EASY_TIMER_INVALID_TIMER;
     }
+#ifdef CFG_IMU_DUAL
+    if (s_rssi_window_timer != EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(s_rssi_window_timer);
+        s_rssi_window_timer = EASY_TIMER_INVALID_TIMER;
+    }
+#endif
     memset(&s_polar, 0, sizeof(s_polar));
     s_polar.conidx = GAP_INVALID_CONIDX;
     s_polar.conhdl = GAP_INVALID_CONHDL;
@@ -1050,6 +1078,12 @@ void pp_imu_polar_on_adv_report(struct gapm_adv_report_ind const *param)
 
     if (polar_is_verity_sense(param->report.data, param->report.data_len))
     {
+#ifdef CFG_IMU_DUAL
+        pp_polar_rssi_picker_add(&s_picker,
+                                 param->report.adv_addr.addr,
+                                 param->report.adv_addr_type,
+                                 param->report.rssi);
+#else
         memcpy(&s_polar.target_addr, &param->report.adv_addr,
                sizeof(struct bd_addr));
         s_polar.target_addr_type = param->report.adv_addr_type;
@@ -1061,8 +1095,40 @@ void pp_imu_polar_on_adv_report(struct gapm_adv_report_ind const *param)
             GAPM_CANCEL_CMD, TASK_GAPM, TASK_APP, gapm_cancel_cmd);
         cmd->operation = GAPM_CANCEL;
         KE_MSG_SEND(cmd);
+#endif
     }
 }
+
+#ifdef CFG_IMU_DUAL
+static void rssi_window_cb(void)
+{
+    pp_polar_candidate_t best;
+
+    s_rssi_window_timer = EASY_TIMER_INVALID_TIMER;
+    if (s_polar.state != POLAR_SCANNING)
+    {
+        return;
+    }
+
+    if (!pp_polar_rssi_picker_best(&s_picker, &best))
+    {
+        pp_imu_manager_on_event(PP_IMU_EV_POLAR_SCAN_FAIL);
+        return;
+    }
+
+    memcpy(s_polar.target_addr.addr, best.addr, PP_POLAR_ADDR_LEN);
+    s_polar.target_addr_type = best.addr_type;
+    s_polar.state = POLAR_CONNECTING;
+    polar_log("adv match");
+
+    {
+        struct gapm_cancel_cmd *cmd = KE_MSG_ALLOC(
+            GAPM_CANCEL_CMD, TASK_GAPM, TASK_APP, gapm_cancel_cmd);
+        cmd->operation = GAPM_CANCEL;
+        KE_MSG_SEND(cmd);
+    }
+}
+#endif
 
 void pp_imu_polar_on_scan_complete(uint8_t status)
 {

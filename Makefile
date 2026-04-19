@@ -118,6 +118,7 @@ SOURCES := \
 	firmware/app/src/paddling_pulse_imu_lis3dh.c \
 	firmware/app/src/paddling_pulse_imu_mpu6050.c \
 	firmware/app/src/paddling_pulse_imu_polar_logic.c \
+	firmware/app/src/paddling_pulse_imu_polar_rssi.c \
 	firmware/app/src/paddling_pulse_imu_polar.c \
 	sdk/platform/arch/boot/system_DA14531.c \
 	sdk/platform/arch/boot/startup_DA14531.c \
