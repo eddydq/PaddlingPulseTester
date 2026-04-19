@@ -44,6 +44,7 @@
 #include "app_default_handlers.h"
 #include "app_adv_data.h"
 #include "co_bt.h"
+#include "da14531_config_basic.h"
 
 /*
  * DEFINES
@@ -219,11 +220,13 @@ static const struct advertise_configuration user_adv_conf = {
  */
 static const struct gapm_configuration user_gapm_conf = {
     /// Device Role: Central, Peripheral, Observer, Broadcaster or All roles. (@see enum gap_role)
+#ifdef CFG_IMU_POLAR
+    .role = GAP_ROLE_ALL,
+    .max_mtu = 247,
+#else
     .role = GAP_ROLE_PERIPHERAL,
-
-    /// Maximal MTU. Shall be set to 23 if Legacy Pairing is used, 65 if Secure Connection is used,
-    /// more if required by the application
     .max_mtu = 23,
+#endif
 
     /// Device Address Type
     .addr_type = APP_CFG_ADDR_TYPE(USER_CFG_ADDRESS_MODE),
@@ -383,10 +386,10 @@ static const struct central_configuration user_central_conf = {
     .superv_to = 0x1F4,
 
      /// Minimum CE length
-    .ce_len_min = 0,
+    .ce_len_min = 15,
 
     /// Maximum CE length
-    .ce_len_max = 0x5,
+    .ce_len_max = 15,
 
     /**************************************************************************************
      * Peer device information (maximum number of peers = 8)

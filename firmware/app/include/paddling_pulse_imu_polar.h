@@ -18,6 +18,7 @@ bool pp_imu_polar_is_running(void);
 /* BLE callback handlers — registered in user_callback_config.h */
 void pp_imu_polar_on_adv_report(struct gapm_adv_report_ind const *param);
 void pp_imu_polar_on_scan_complete(uint8_t status);
+void pp_imu_polar_on_connect_failed(void);
 
 /* Connection handlers — called from user_app_connection/disconnect */
 bool pp_imu_polar_on_connection(uint8_t conidx,
