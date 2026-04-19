@@ -72,7 +72,7 @@
 #ifdef CFG_IMU_POLAR
 #define CFG_MAX_CONNECTIONS     (2)
 #else
-#define CFG_MAX_CONNECTIONS     (1)
+#define CFG_MAX_CONNECTIONS     (2)
 #endif
 
 /****************************************************************************************************************/
@@ -119,9 +119,9 @@
 /****************************************************************************************************************/
 /* IMU source selection — exactly one must be defined.                                                          */
 /****************************************************************************************************************/
-#define CFG_IMU_LIS3DH
+// define CFG_IMU_LIS3DH
 // #define CFG_IMU_MPU6050
-// #define CFG_IMU_POLAR
+#define CFG_IMU_POLAR
 
 /****************************************************************************************************************/
 /* IMU axis selection — exactly one must be defined.                                                            */

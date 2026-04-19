@@ -128,11 +128,7 @@
 /****************************************************************************************************************/
 /* Enables the BLE statistics measurement feature.                                                              */
 /****************************************************************************************************************/
-#ifdef CFG_IMU_POLAR
 #undef CFG_BLE_METRICS
-#else
-#define CFG_BLE_METRICS
-#endif
 
 /****************************************************************************************************************/
 /* Output the Hardfault arguments to serial/UART interface.                                                     */
@@ -149,11 +145,7 @@
 /*             supportedMaxTxTime = (supportedMaxTxOctets + 11 + 3 ) * 8                                        */
 /*         Range: 328 - 2120 usec.                                                                              */
 /****************************************************************************************************************/
-#ifdef CFG_IMU_POLAR
 #define CFG_MAX_TX_PACKET_LENGTH        (69)
-#else
-#define CFG_MAX_TX_PACKET_LENGTH        (251)
-#endif
 
 /****************************************************************************************************************/
 /* Maximum supported RX data packet length (supportedMaxRxOctets value, as defined in 4.2 Specification).       */
@@ -165,11 +157,7 @@
 /*             supportedMaxRxTime = (supportedMaxRxOctets + 11 + 3 ) * 8                                        */
 /*         Range: 328 - 2120 usec.                                                                              */
 /****************************************************************************************************************/
-#ifdef CFG_IMU_POLAR
 #define CFG_MAX_RX_PACKET_LENGTH        (69)
-#else
-#define CFG_MAX_RX_PACKET_LENGTH        (251)
-#endif
 
 /****************************************************************************************************************/
 /* Select external application/host transport layer:                                                            */
@@ -207,20 +195,12 @@
 /* Maximum retention memory in bytes. The base address of the retention data is calculated from the selected    */
 /* size.                                                                                                        */
 /****************************************************************************************************************/
-#ifdef CFG_IMU_POLAR
 #define CFG_RET_DATA_SIZE    (1860)
-#else
-#define CFG_RET_DATA_SIZE    (2048)
-#endif
 
 /****************************************************************************************************************/
 /* Maximum uninitialized retained data required by the application.                                             */
 /****************************************************************************************************************/
-#ifdef CFG_IMU_POLAR
 #define CFG_RET_DATA_UNINIT_SIZE (12)
-#else
-#define CFG_RET_DATA_UNINIT_SIZE (0)
-#endif
 
 /****************************************************************************************************************/
 /* RAM cell(s) retention mode handling. The user has to select which RAM cells must be retained during the      */
