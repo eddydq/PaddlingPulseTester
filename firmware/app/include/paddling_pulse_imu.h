@@ -1,7 +1,7 @@
 /**
  ****************************************************************************************
  * @file paddling_pulse_imu.h
- * @brief Common IMU driver interface — compile-time routed via #ifdef.
+ * @brief Common IMU driver interface - compile-time routed via #ifdef.
  ****************************************************************************************
  */
 
@@ -10,8 +10,8 @@
 
 #include "da14531_config_basic.h"
 
-/* Mutual exclusivity guards */
-#if defined(CFG_IMU_POLAR) + defined(CFG_IMU_MPU6050) + defined(CFG_IMU_LIS3DH) != 1
+#if defined(CFG_IMU_POLAR) + defined(CFG_IMU_MPU6050) + \
+    defined(CFG_IMU_LIS3DH) + defined(CFG_IMU_DUAL) != 1
     #error "Exactly one CFG_IMU_* must be defined"
 #endif
 
@@ -19,16 +19,17 @@
     #error "Exactly one CFG_IMU_AXIS_* must be defined"
 #endif
 
-/* Include active driver header */
 #if defined(CFG_IMU_LIS3DH)
     #include "paddling_pulse_imu_lis3dh.h"
 #elif defined(CFG_IMU_MPU6050)
     #include "paddling_pulse_imu_mpu6050.h"
 #elif defined(CFG_IMU_POLAR)
     #include "paddling_pulse_imu_polar.h"
+#elif defined(CFG_IMU_DUAL)
+    #include "paddling_pulse_imu_manager.h"
+    #include "paddling_pulse_imu_lis3dh.h"
+    #include "paddling_pulse_imu_polar.h"
 #endif
-
-/* --- Unified API: each call maps to the selected driver --- */
 
 static __inline bool pp_imu_init(void)
 {
@@ -38,6 +39,9 @@ static __inline bool pp_imu_init(void)
     return pp_imu_mpu6050_init();
 #elif defined(CFG_IMU_POLAR)
     return pp_imu_polar_init();
+#elif defined(CFG_IMU_DUAL)
+    pp_imu_manager_init();
+    return true;
 #endif
 }
 
@@ -49,6 +53,8 @@ static __inline void pp_imu_start(void)
     pp_imu_mpu6050_start();
 #elif defined(CFG_IMU_POLAR)
     pp_imu_polar_start();
+#elif defined(CFG_IMU_DUAL)
+    pp_imu_manager_start();
 #endif
 }
 
@@ -60,6 +66,8 @@ static __inline void pp_imu_stop(void)
     pp_imu_mpu6050_stop();
 #elif defined(CFG_IMU_POLAR)
     pp_imu_polar_stop();
+#elif defined(CFG_IMU_DUAL)
+    pp_imu_manager_stop();
 #endif
 }
 
@@ -70,7 +78,9 @@ static __inline void pp_imu_process(void)
 #elif defined(CFG_IMU_MPU6050)
     pp_imu_mpu6050_process();
 #elif defined(CFG_IMU_POLAR)
-    /* Polar data arrives via GATTC_EVENT_IND — nothing to poll */
+    /* Polar data arrives via GATTC_EVENT_IND - nothing to poll */
+#elif defined(CFG_IMU_DUAL)
+    pp_imu_manager_process();
 #endif
 }
 
@@ -82,6 +92,8 @@ static __inline bool pp_imu_is_running(void)
     return pp_imu_mpu6050_is_running();
 #elif defined(CFG_IMU_POLAR)
     return pp_imu_polar_is_running();
+#elif defined(CFG_IMU_DUAL)
+    return pp_imu_manager_get_source() != PP_IMU_NONE;
 #endif
 }
 
@@ -93,7 +105,19 @@ static __inline const char *pp_imu_get_name(void)
     return "MPU6050";
 #elif defined(CFG_IMU_POLAR)
     return "Polar";
+#elif defined(CFG_IMU_DUAL)
+    switch (pp_imu_manager_get_source())
+    {
+    case PP_IMU_POLAR:
+        return "Polar";
+
+    case PP_IMU_LIS3DH:
+        return "LIS3DH";
+
+    default:
+        return "none";
+    }
 #endif
 }
 
-#endif // _PADDLING_PULSE_IMU_H_
+#endif /* _PADDLING_PULSE_IMU_H_ */

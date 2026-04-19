@@ -7,7 +7,7 @@
 
 #include "da14531_config_basic.h"
 
-#ifdef CFG_IMU_POLAR
+#if defined(CFG_IMU_POLAR) || defined(CFG_IMU_DUAL)
 
 #include "paddling_pulse_imu_polar.h"
 #include "paddling_pulse_sample_store.h"
@@ -707,6 +707,11 @@ static void polar_handle_cp_event(const uint8_t *value, uint16_t length)
         polar_log_state_change(s_polar.state, POLAR_STREAMING, "streaming");
         s_polar.state = POLAR_STREAMING;
 
+#ifdef CFG_IMU_DUAL
+        pp_imu_manager_on_event(PP_IMU_EV_POLAR_STREAMING);
+#endif
+
+#ifndef CFG_IMU_DUAL
         {
             uint16_t actual_rate_hz = pp_imu_polar_get_actual_sample_rate_hz();
             if (actual_rate_hz != pp_sample_store_get_rate_hz())
@@ -715,6 +720,7 @@ static void polar_handle_cp_event(const uint8_t *value, uint16_t length)
                 pp_stroke_rate_init(&pp_imu_polar_params);
             }
         }
+#endif
     }
     else
     {
@@ -1244,6 +1250,10 @@ bool pp_imu_polar_on_disconnect(uint16_t conhdl)
                                       s_polar.state == POLAR_IDLE))
         return false;
 
+#ifdef CFG_IMU_DUAL
+    pp_imu_manager_on_event(PP_IMU_EV_POLAR_DISCONNECT);
+#endif
+
     action = pp_polar_stop_completion_action(s_stop_cancel_pending);
     if (action == PP_POLAR_STOP_COMPLETION_RESET)
     {
@@ -1397,4 +1407,4 @@ bool pp_imu_polar_handle_message(ke_msg_id_t msgid,
     return false;
 }
 
-#endif /* CFG_IMU_POLAR */
+#endif /* CFG_IMU_POLAR || CFG_IMU_DUAL */

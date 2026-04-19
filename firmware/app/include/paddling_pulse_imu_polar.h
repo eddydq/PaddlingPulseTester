@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#ifdef CFG_IMU_POLAR
+#if defined(CFG_IMU_POLAR) || defined(CFG_IMU_DUAL)
 
 #include "paddling_pulse_stroke_rate.h"
 #include "ke_msg.h"
@@ -42,6 +42,6 @@ bool pp_imu_polar_handle_message(ke_msg_id_t msgid,
                                  ke_task_id_t dest_id,
                                  ke_task_id_t src_id);
 
-#endif /* CFG_IMU_POLAR */
+#endif /* CFG_IMU_POLAR || CFG_IMU_DUAL */
 
 #endif

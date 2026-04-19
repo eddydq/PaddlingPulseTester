@@ -7,7 +7,7 @@
 
 #include "da14531_config_basic.h"
 
-#if defined(CFG_IMU_LIS3DH) || defined(CFG_IMU_MPU6050)
+#if defined(CFG_IMU_LIS3DH) || defined(CFG_IMU_MPU6050) || defined(CFG_IMU_DUAL)
 
 #include "paddling_pulse_imu_lis3dh.h"
 
@@ -41,7 +41,7 @@ const pp_stroke_rate_params_t pp_imu_lis3dh_params = {
 
 #endif
 
-#ifdef CFG_IMU_LIS3DH
+#if defined(CFG_IMU_LIS3DH) || defined(CFG_IMU_DUAL)
 
 #include "paddling_pulse_sample_store.h"
 #include "paddling_pulse_board.h"
@@ -238,4 +238,4 @@ bool pp_imu_lis3dh_is_running(void)
     return s_running;
 }
 
-#endif /* CFG_IMU_LIS3DH */
+#endif /* CFG_IMU_LIS3DH || CFG_IMU_DUAL */
