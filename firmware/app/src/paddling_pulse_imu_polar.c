@@ -802,7 +802,12 @@ void pp_imu_polar_on_connect_failed(void)
 
     ke_state_set(TASK_APP, APP_CONNECTED);
 
-    if (!s_stop_cancel_pending && !s_retry_cancel_pending)
+    if (s_stop_cancel_pending)
+    {
+        s_stop_cancel_pending = false;
+        polar_reset();
+    }
+    else if (!s_retry_cancel_pending)
     {
         polar_retry_if_needed();
     }
