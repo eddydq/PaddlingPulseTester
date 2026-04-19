@@ -429,6 +429,166 @@ rate; battery-loss retained-RAM erasure.
   this work via `pp_imu_polar_get_actual_sample_rate_hz`. Tested
   indirectly by "rate-change-on-reconnect" unit case.
 
+## PR Structure for Review
+
+The implementation is split into **two PRs** so each is small enough to be
+reviewed cleanly (by `/ultrareview` or a human) without context overload.
+
+### PR 1 — Stroke-rate params refactor (pure refactor, no runtime change)
+
+**Intent:** introduce `pp_stroke_rate_params_t`; make the algorithm read from
+a params pointer instead of macro constants. Add per-driver const params
+blocks. No behavioral change in any single-IMU build.
+
+**Files touched:**
+
+| File | Change |
+|---|---|
+| `firmware/app/include/paddling_pulse_stroke_rate.h` | define `pp_stroke_rate_params_t`; change `pp_stroke_rate_init` signature to take `const pp_stroke_rate_params_t *` |
+| `firmware/app/src/paddling_pulse_stroke_rate.c` | replace macro reads with `s_params->*`; store pointer in retained RAM |
+| `firmware/app/include/paddling_pulse_imu_lis3dh.h` | declare `extern const pp_stroke_rate_params_t pp_imu_lis3dh_params` |
+| `firmware/app/src/paddling_pulse_imu_lis3dh.c` | define `pp_imu_lis3dh_params`; replace `#if defined(CFG_IMU_AXIS_*)` with `switch(params->axis)` using compile-time-initialized axis |
+| `firmware/app/include/paddling_pulse_imu_polar.h` | declare `extern const pp_stroke_rate_params_t pp_imu_polar_params`; declare `pp_imu_polar_get_actual_sample_rate_hz()` |
+| `firmware/app/src/paddling_pulse_imu_polar.c` | define `pp_imu_polar_params`; implement accessor; replace `#if defined(CFG_IMU_AXIS_*)` with runtime read |
+| `firmware/app/src/paddling_pulse_app.c` | pass `&pp_imu_<active>_params` to `pp_stroke_rate_init`; call accessor after Polar streams to re-init sample store with actual rate (fixes latent bug) |
+| `tests/` | update existing stroke-rate test callers to pass params pointer |
+
+**Acceptance criteria for PR 1** (reviewer can tick each from the diff):
+
+- [ ] No new `CFG_IMU_DUAL` code in PR 1 — strictly a refactor.
+- [ ] Every `#if defined(CFG_IMU_AXIS_*)` block in both drivers is removed;
+      axis reads go through `params->axis`.
+- [ ] `pp_stroke_rate_init` is the only entry point that changes signature;
+      no other public API touched.
+- [ ] `pp_imu_polar_get_actual_sample_rate_hz` has a comment stating it is
+      only valid after `ON_STREAMING` (or after PMD settings are parsed).
+- [ ] `pipeline_start` in `paddling_pulse_app.c` calls the accessor when
+      `CFG_IMU_POLAR` is defined and re-inits the sample store if the
+      actual rate differs from the hardcoded default — fixes the latent bug.
+- [ ] `pp_imu_lis3dh_params` and `pp_imu_polar_params` are `const` and placed
+      in `.rodata` (no `__SECTION_ZERO` or non-const storage).
+- [ ] Default values in each params block reference the existing
+      `PP_STROKE_RATE_*` / `PP_KALMAN_*` / `PP_AUTOCORR_*` macros where
+      tuning is identical; only axis, sample rate, window, and energy floor
+      are overridden.
+- [ ] Existing host tests (`test_polar_logic`, `test_console_commands`)
+      still pass with no modification to their logic — only call-site fixes
+      for the new signature.
+- [ ] All four existing build configs (`CFG_IMU_LIS3DH`, `CFG_IMU_POLAR`,
+      `CFG_IMU_MPU6050`, each with their respective `CFG_IMU_AXIS_*`) build
+      clean via `mingw32-make` with zero linker warnings.
+
+### PR 2 — Dual-IMU runtime manager
+
+**Intent:** add `CFG_IMU_DUAL` mode with the manager module, state machine,
+RSSI-best-wins Polar picker, and `AT+IMU=X` console SET command.
+
+**Files touched:**
+
+| File | Change |
+|---|---|
+| `firmware/app/include/paddling_pulse_imu_manager.h` | **new:** enum types, public API, named timeouts |
+| `firmware/app/src/paddling_pulse_imu_manager.c` | **new:** state machine + retained-RAM state |
+| `firmware/app/include/paddling_pulse_imu.h` | under `CFG_IMU_DUAL`, replace inline dispatchers with manager-delegating declarations; extend the mutual-exclusion guard |
+| `firmware/app/src/paddling_pulse_imu_polar.c` | add RSSI candidate buffer + window timer; emit manager events under `CFG_IMU_DUAL` |
+| `firmware/app/src/paddling_pulse_imu_lis3dh.c` | compile under `CFG_IMU_DUAL` as well as `CFG_IMU_LIS3DH` |
+| `firmware/app/src/paddling_pulse_app.c` | call manager API under `CFG_IMU_DUAL`; existing `pp_imu_*` API otherwise |
+| `firmware/app/src/paddling_pulse_console_commands.c` | add `PP_CONSOLE_CMD_IMU_SET` parse; token-bounded `AUTO`/`LIS3DH`/`POLAR` |
+| `firmware/app/src/paddling_pulse_console.c` | handler for `IMU_SET`; enhanced `IMU_GET` output |
+| `firmware/config/da14531_config_basic.h` | add `CFG_IMU_DUAL` option and default timeout defines |
+| `tests/test_imu_manager.c` | **new:** state machine cases |
+| `tests/test_polar_logic.c` | extend with RSSI picker cases |
+| `tests/test_console_commands.c` | extend with `AT+IMU=X` cases |
+
+**Acceptance criteria for PR 2** (reviewer ticks from diff + PR description):
+
+Code-level (diff review):
+
+- [ ] `paddling_pulse_imu.h` mutual-exclusion guard includes `CFG_IMU_DUAL`
+      in the "exactly one" count.
+- [ ] Every new static variable that needs to survive sleep carries
+      `__SECTION_ZERO("retention_mem_area0")`. Grep the diff.
+- [ ] `s_candidates` in `paddling_pulse_imu_polar.c` has **no**
+      `__SECTION_ZERO` attribute.
+- [ ] No magic numbers for timeouts or sizes; every value is a named
+      constant (`PP_POLAR_BOOT_SCAN_TIMEOUT_MS`,
+      `PP_POLAR_RECONNECT_TIMEOUT_MS`, `PP_POLAR_RSSI_WINDOW_MS`,
+      `PP_POLAR_MAX_CANDIDATES`).
+- [ ] `AT+IMU=X` parsing uses `pp_console_token_equals` (length-bounded),
+      not raw `strcmp`.
+- [ ] Every `pp_imu_<x>_start` in the manager is paired with a
+      `pp_imu_<x>_stop` on every exit path out of the corresponding state.
+- [ ] The switch sequence in the manager calls `stop → sample_store_init →
+      stroke_rate_init → start` **in that order**. Reviewer can confirm
+      from the single `imu_manager_switch_source` function.
+- [ ] Under `CFG_IMU_POLAR` (single-IMU, not DUAL), the Polar event
+      callbacks remain inert — no manager calls compile in.
+- [ ] No `malloc`, no new `KE_MSG_ALLOC` call sites beyond what existed.
+- [ ] No Claude co-author attribution in any commit.
+
+Test coverage (diff review):
+
+- [ ] `test_imu_manager.c` includes each state-machine case from the
+      "Testing Strategy" section (boot AUTO + Polar found, boot AUTO +
+      timeout, POLAR override + timeout, LIS3DH override, reconnect within
+      window, reconnect after timeout, atomic override switch, BOGUS
+      rejection, rate-change-on-reconnect).
+- [ ] `test_polar_logic.c` includes the four RSSI cases (0, 1, N > 1,
+      N > MAX).
+- [ ] `test_console_commands.c` covers `AT+IMU=AUTO`, `AT+IMU=LIS3DH`,
+      `AT+IMU=POLAR`, `AT+IMU=BOGUS`, and enhanced GET format.
+
+Verification evidence (must appear in PR description, not the diff):
+
+- [ ] `.map` diff for `retention_mem_area0`: before bytes, after bytes,
+      headroom remaining. Numeric, copy-pasted from the linker output.
+- [ ] `.map` diff for `.text` + `.rodata`: before, after, headroom.
+- [ ] Output of four build configs (`CFG_IMU_LIS3DH`, `CFG_IMU_POLAR`,
+      `CFG_IMU_MPU6050`, `CFG_IMU_DUAL`), each showing clean build with
+      zero linker warnings.
+- [ ] Host test suite output: all tests pass.
+- [ ] Hardware integration steps 1–6 from the "Testing Strategy" section
+      checked off with observed behavior (text from console serial).
+- [ ] Step 7 (two-strap RSSI) either checked off with observed behavior
+      or explicitly marked "deferred — single-strap environment" if only
+      one strap is available.
+
+## PR Description Template
+
+Every PR in this work must paste this template (populated) into its
+description so automated review has the evidence it needs without having
+to infer from the diff:
+
+```
+## Scope
+[one-line summary + link to docs/superpowers/specs/2026-04-19-dual-imu-lis3dh-polar-design.md]
+
+## Acceptance Criteria
+[copy the matching checklist from the spec; tick each item]
+
+## Memory Verification
+retention_mem_area0: before=XXXX B, after=YYYY B, ceiling=ZZZZ B, headroom=WWWW B
+.text + .rodata:     before=XXXX B, after=YYYY B, ceiling=ZZZZ B, headroom=WWWW B
+
+## Build Matrix
+CFG_IMU_LIS3DH : PASS / FAIL (link to linker output)
+CFG_IMU_POLAR  : PASS / FAIL
+CFG_IMU_MPU6050: PASS / FAIL
+CFG_IMU_DUAL   : PASS / FAIL (PR 2 only)
+
+## Host Tests
+[copy test runner output]
+
+## Hardware Integration (PR 2 only)
+Step 1 cold-boot + strap:       [observed behavior]
+Step 2 cold-boot + no strap:    [observed behavior]
+Step 3 mid-session drop:        [observed behavior]
+Step 4 drop + reconnect:        [observed behavior]
+Step 5 AT+IMU=LIS3DH runtime:   [observed behavior]
+Step 6 warm reset:              [observed behavior]
+Step 7 two straps:              [observed behavior | DEFERRED with reason]
+```
+
 ## Success Criteria
 
 - `CFG_IMU_DUAL` builds cleanly; all three single-IMU builds still build
