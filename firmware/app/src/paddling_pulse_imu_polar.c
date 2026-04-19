@@ -24,6 +24,9 @@
 #include "app.h"
 #include "app_task.h"
 #include "arch.h"
+#ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
+#include "paddling_pulse_console_io.h"
+#endif
 #include "paddling_pulse_imu_polar_logic.h"
 #include "user_config.h"
 #include <string.h>
@@ -84,6 +87,168 @@ enum polar_state {
     POLAR_STREAMING,
 };
 
+#ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
+static const char *polar_state_name(uint8_t state)
+{
+    switch (state)
+    {
+    case POLAR_IDLE:             return "IDLE";
+    case POLAR_SCANNING:         return "SCANNING";
+    case POLAR_CONNECTING:       return "CONNECTING";
+    case POLAR_WAIT_MTU:         return "WAIT_MTU";
+    case POLAR_DISC_SVC:         return "DISC_SVC";
+    case POLAR_DISC_CHARS:       return "DISC_CHARS";
+    case POLAR_DISC_CP_CCCD:     return "DISC_CP_CCCD";
+    case POLAR_DISC_DATA_CCCD:   return "DISC_DATA_CCCD";
+    case POLAR_ENABLE_CP_NTF:    return "ENABLE_CP_NTF";
+    case POLAR_ENABLE_DATA_NTF:  return "ENABLE_DATA_NTF";
+    case POLAR_GET_ACC_SETTINGS: return "GET_ACC_SETTINGS";
+    case POLAR_START_ACC:        return "START_ACC";
+    case POLAR_STREAMING:        return "STREAMING";
+    default:                     return "UNKNOWN";
+    }
+}
+
+static void polar_log(const char *message)
+{
+    paddling_pulse_console_printf("POLAR: %s\r\n", message);
+}
+
+static void polar_log_status(const char *message, uint16_t status)
+{
+    paddling_pulse_console_printf("POLAR: %s st=%u\r\n", message, status);
+}
+
+static void polar_log_scan_complete(uint8_t status, uint8_t state)
+{
+    paddling_pulse_console_printf("POLAR: scan complete st=%u state=%s\r\n",
+                                  status,
+                                  polar_state_name(state));
+}
+
+static void polar_log_conn(const char *message, uint8_t conidx, uint16_t conhdl)
+{
+    paddling_pulse_console_printf("POLAR: %s idx=%u h=%u\r\n",
+                                  message, conidx, conhdl);
+}
+
+static void polar_log_handle(const char *name, uint16_t handle)
+{
+    paddling_pulse_console_printf("POLAR: %s=%04X\r\n", name, handle);
+}
+
+static void polar_log_range(const char *name, uint16_t start_hdl, uint16_t end_hdl)
+{
+    paddling_pulse_console_printf("POLAR: %s=%04X-%04X\r\n",
+                                  name, start_hdl, end_hdl);
+}
+
+static void polar_log_addr(const char *message, uint8_t addr_type,
+                           const struct bd_addr *addr)
+{
+    paddling_pulse_console_printf("POLAR: %s type=%u addr=%02X:%02X:%02X:%02X:%02X:%02X\r\n",
+                                  message,
+                                  addr_type,
+                                  addr->addr[5], addr->addr[4], addr->addr[3],
+                                  addr->addr[2], addr->addr[1], addr->addr[0]);
+}
+
+static void polar_log_state_change(uint8_t from_state, uint8_t to_state,
+                                   const char *step)
+{
+    paddling_pulse_console_printf("POLAR: %s->%s %s\r\n",
+                                  polar_state_name(from_state),
+                                  polar_state_name(to_state),
+                                  step);
+}
+
+static void polar_log_acc_cfg(uint16_t sample_rate_hz, uint8_t tlv_count)
+{
+    paddling_pulse_console_printf("POLAR: acc cfg rate=%uHz tlvs=%u\r\n",
+                                  sample_rate_hz, tlv_count);
+}
+
+static void polar_log_app_states(const char *tag)
+{
+#if APP_IDX_MAX > 1
+    paddling_pulse_console_printf(
+        "POLAR: %s app_state[0]=%u app_state[1]=%u\r\n",
+        tag,
+        ke_state_get(KE_BUILD_ID(TASK_APP, 0)),
+        ke_state_get(KE_BUILD_ID(TASK_APP, 1)));
+#else
+    paddling_pulse_console_printf(
+        "POLAR: %s app_state=%u\r\n",
+        tag,
+        ke_state_get(TASK_APP));
+#endif
+}
+#else
+static void polar_log(const char *message)
+{
+    (void)message;
+}
+
+static void polar_log_status(const char *message, uint16_t status)
+{
+    (void)message;
+    (void)status;
+}
+
+static void polar_log_scan_complete(uint8_t status, uint8_t state)
+{
+    (void)status;
+    (void)state;
+}
+
+static void polar_log_conn(const char *message, uint8_t conidx, uint16_t conhdl)
+{
+    (void)message;
+    (void)conidx;
+    (void)conhdl;
+}
+
+static void polar_log_handle(const char *name, uint16_t handle)
+{
+    (void)name;
+    (void)handle;
+}
+
+static void polar_log_range(const char *name, uint16_t start_hdl, uint16_t end_hdl)
+{
+    (void)name;
+    (void)start_hdl;
+    (void)end_hdl;
+}
+
+static void polar_log_addr(const char *message, uint8_t addr_type,
+                           const struct bd_addr *addr)
+{
+    (void)message;
+    (void)addr_type;
+    (void)addr;
+}
+
+static void polar_log_state_change(uint8_t from_state, uint8_t to_state,
+                                   const char *step)
+{
+    (void)from_state;
+    (void)to_state;
+    (void)step;
+}
+
+static void polar_log_acc_cfg(uint16_t sample_rate_hz, uint8_t tlv_count)
+{
+    (void)sample_rate_hz;
+    (void)tlv_count;
+}
+
+static void polar_log_app_states(const char *tag)
+{
+    (void)tag;
+}
+#endif
+
 /*
  * ENVIRONMENT
  */
@@ -108,6 +273,7 @@ static struct {
 } s_polar __SECTION_ZERO("retention_mem_area0");
 
 static timer_hnd s_connect_timer __SECTION_ZERO("retention_mem_area0");
+static timer_hnd s_scan_retry_timer __SECTION_ZERO("retention_mem_area0");
 static bool s_stop_cancel_pending __SECTION_ZERO("retention_mem_area0");
 static bool s_retry_cancel_pending __SECTION_ZERO("retention_mem_area0");
 
@@ -247,6 +413,7 @@ static void polar_start_scan(void)
 
     polar_clear_handles();
     s_polar.state = POLAR_SCANNING;
+    polar_log("scan start");
 
     struct gapm_start_scan_cmd *cmd = KE_MSG_ALLOC(
         GAPM_START_SCAN_CMD, TASK_GAPM, TASK_APP, gapm_start_scan_cmd);
@@ -265,6 +432,7 @@ static void polar_connect_timeout_cb(void)
     s_connect_timer = EASY_TIMER_INVALID_TIMER;
     if (s_polar.state == POLAR_CONNECTING)
     {
+        polar_log("connect timeout");
         ke_state_set(TASK_APP, APP_CONNECTED);
         s_retry_cancel_pending = true;
         struct gapm_cancel_cmd *cmd = KE_MSG_ALLOC(
@@ -279,11 +447,15 @@ static void polar_start_connection(void)
     if (s_polar.state != POLAR_CONNECTING) return;
 
     s_retry_cancel_pending = false;
+    polar_log_addr("connect start", s_polar.target_addr_type, &s_polar.target_addr);
+    polar_log_app_states("before connect");
+
     app_easy_gap_start_connection_to_set(
         s_polar.target_addr_type,
         (uint8_t *)&s_polar.target_addr,
         POLAR_CONNECT_INTV);
     app_easy_gap_start_connection_to();
+    polar_log_app_states("after connect start");
     ke_state_set(TASK_APP, APP_CONNECTABLE);
 
     s_connect_timer = app_easy_timer(POLAR_CONNECT_TIMEOUT, polar_connect_timeout_cb);
@@ -291,6 +463,7 @@ static void polar_start_connection(void)
 
 static void polar_deferred_connect_cb(void)
 {
+    polar_log("connect defer");
     polar_start_connection();
 }
 
@@ -435,6 +608,7 @@ static void polar_handle_cp_event(const uint8_t *value, uint16_t length)
 
     if (opcode == POLAR_PMD_OP_GET_SETTINGS && status == POLAR_PMD_STATUS_SUCCESS)
     {
+        memset(&parsed, 0, sizeof(parsed));
         s_polar.acc_selected_tlvs_len = 0;
         s_polar.acc_sample_rate_hz = 52;
 
@@ -448,6 +622,8 @@ static void polar_handle_cp_event(const uint8_t *value, uint16_t length)
         }
 
         /* Start accelerometer measurement */
+        polar_log_acc_cfg(s_polar.acc_sample_rate_hz, parsed.tlv_count);
+        polar_log_state_change(s_polar.state, POLAR_START_ACC, "acc start");
         s_polar.state = POLAR_START_ACC;
         polar_send_cp_cmd(POLAR_PMD_OP_START_MEAS, POLAR_PMD_MEAS_ACC,
                           s_polar.acc_selected_tlvs,
@@ -456,7 +632,13 @@ static void polar_handle_cp_event(const uint8_t *value, uint16_t length)
     }
     else if (opcode == POLAR_PMD_OP_START_MEAS && status == POLAR_PMD_STATUS_SUCCESS)
     {
+        polar_log_state_change(s_polar.state, POLAR_STREAMING, "streaming");
         s_polar.state = POLAR_STREAMING;
+    }
+    else
+    {
+        paddling_pulse_console_printf("POLAR: cp rsp op=%u st=%u\r\n",
+                                      opcode, status);
     }
 }
 
@@ -494,6 +676,7 @@ static void polar_on_disc_svc(const struct gattc_disc_svc_ind *ind)
     {
         s_polar.svc_start = ind->start_hdl;
         s_polar.svc_end   = ind->end_hdl;
+        polar_log_range("svc", s_polar.svc_start, s_polar.svc_end);
     }
 }
 
@@ -505,11 +688,13 @@ static void polar_on_disc_char(const struct gattc_disc_char_ind *ind)
     {
         s_polar.cp_decl_handle = ind->attr_hdl;
         s_polar.cp_handle      = ind->pointer_hdl;
+        polar_log_handle("cp", s_polar.cp_handle);
     }
     else if (memcmp(ind->uuid, polar_pmd_data_uuid, ATT_UUID_128_LEN) == 0)
     {
         s_polar.data_decl_handle = ind->attr_hdl;
         s_polar.data_handle      = ind->pointer_hdl;
+        polar_log_handle("data", s_polar.data_handle);
     }
 }
 
@@ -522,9 +707,15 @@ static void polar_on_disc_desc(const struct gattc_disc_char_desc_ind *ind)
         if (uuid16 == ATT_DESC_CLIENT_CHAR_CFG)
         {
             if (s_polar.state == POLAR_DISC_CP_CCCD)
+            {
                 s_polar.cp_cccd_handle = ind->attr_hdl;
+                polar_log_handle("cp_cccd", s_polar.cp_cccd_handle);
+            }
             else if (s_polar.state == POLAR_DISC_DATA_CCCD)
+            {
                 s_polar.data_cccd_handle = ind->attr_hdl;
+                polar_log_handle("data_cccd", s_polar.data_cccd_handle);
+            }
         }
     }
 }
@@ -557,6 +748,8 @@ static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
         evt->status != GAP_ERR_NO_ERROR)
     {
         /* Discovery/write failed — disconnect and retry */
+        paddling_pulse_console_printf("POLAR: gatt fail op=%u st=%u\r\n",
+                                      evt->operation, evt->status);
         polar_disconnect_setup_error();
         return;
     }
@@ -566,6 +759,7 @@ static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
     case POLAR_WAIT_MTU:
         if (evt->operation == GATTC_MTU_EXCH)
         {
+            polar_log_state_change(s_polar.state, POLAR_DISC_SVC, "svc disc");
             s_polar.state = POLAR_DISC_SVC;
             polar_gatt_discover_svc(s_polar.conidx);
         }
@@ -576,9 +770,11 @@ static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
         {
             if (s_polar.svc_start == 0)
             {
+                polar_log("svc missing");
                 polar_disconnect_setup_error();
                 break;
             }
+            polar_log_state_change(s_polar.state, POLAR_DISC_CHARS, "chars disc");
             s_polar.state = POLAR_DISC_CHARS;
             polar_gatt_discover_chars(s_polar.conidx);
         }
@@ -589,9 +785,11 @@ static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
         {
             if (s_polar.cp_handle == 0 || s_polar.data_handle == 0)
             {
+                polar_log("chars missing");
                 polar_disconnect_setup_error();
                 break;
             }
+            polar_log_state_change(s_polar.state, POLAR_DISC_CP_CCCD, "cp cccd disc");
             s_polar.state = POLAR_DISC_CP_CCCD;
             polar_gatt_discover_desc(s_polar.conidx,
                                      s_polar.cp_handle + 1,
@@ -604,9 +802,11 @@ static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
         {
             if (s_polar.cp_cccd_handle == 0)
             {
+                polar_log("cp cccd missing");
                 polar_disconnect_setup_error();
                 break;
             }
+            polar_log_state_change(s_polar.state, POLAR_DISC_DATA_CCCD, "data cccd disc");
             s_polar.state = POLAR_DISC_DATA_CCCD;
             polar_gatt_discover_desc(s_polar.conidx,
                                      s_polar.data_handle + 1,
@@ -619,9 +819,11 @@ static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
         {
             if (s_polar.data_cccd_handle == 0)
             {
+                polar_log("data cccd missing");
                 polar_disconnect_setup_error();
                 break;
             }
+            polar_log_state_change(s_polar.state, POLAR_ENABLE_CP_NTF, "cp ind req");
             s_polar.state = POLAR_ENABLE_CP_NTF;
             uint8_t cccd_val[2] = { 0x02, 0x00 };  /* indications */
             polar_gatt_write(s_polar.conidx, s_polar.cp_cccd_handle,
@@ -632,6 +834,8 @@ static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
     case POLAR_ENABLE_CP_NTF:
         if (evt->operation == GATTC_WRITE && evt->seq_num == POLAR_SEQ_CP_CCCD)
         {
+            polar_log("cp ind on");
+            polar_log_state_change(s_polar.state, POLAR_ENABLE_DATA_NTF, "data ntf req");
             s_polar.state = POLAR_ENABLE_DATA_NTF;
             uint8_t cccd_val[2] = { 0x01, 0x00 };  /* notifications */
             polar_gatt_write(s_polar.conidx, s_polar.data_cccd_handle,
@@ -642,6 +846,8 @@ static void polar_on_gattc_cmp(const struct gattc_cmp_evt *evt)
     case POLAR_ENABLE_DATA_NTF:
         if (evt->operation == GATTC_WRITE && evt->seq_num == POLAR_SEQ_DATA_CCCD)
         {
+            polar_log("data ntf on");
+            polar_log_state_change(s_polar.state, POLAR_GET_ACC_SETTINGS, "acc settings req");
             s_polar.state = POLAR_GET_ACC_SETTINGS;
             polar_send_cp_cmd(POLAR_PMD_OP_GET_SETTINGS, POLAR_PMD_MEAS_ACC,
                               NULL, 0, POLAR_SEQ_GET_ACC_SET);
@@ -677,6 +883,11 @@ static void polar_reset(void)
         app_easy_timer_cancel(s_connect_timer);
         s_connect_timer = EASY_TIMER_INVALID_TIMER;
     }
+    if (s_scan_retry_timer != EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(s_scan_retry_timer);
+        s_scan_retry_timer = EASY_TIMER_INVALID_TIMER;
+    }
     memset(&s_polar, 0, sizeof(s_polar));
     s_polar.conidx = GAP_INVALID_CONIDX;
     s_polar.conhdl = GAP_INVALID_CONHDL;
@@ -684,15 +895,25 @@ static void polar_reset(void)
     s_retry_cancel_pending = false;
 }
 
-static void polar_retry_if_needed(void)
+static void polar_deferred_retry_cb(void)
 {
     /* Retry scan if CSC notifications are still enabled */
     extern bool csc_meas_ntf_enabled;
+    s_scan_retry_timer = EASY_TIMER_INVALID_TIMER;
     polar_reset();
     if (csc_meas_ntf_enabled)
     {
         polar_start_scan();
     }
+}
+
+static void polar_retry_if_needed(void)
+{
+    if (s_scan_retry_timer != EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(s_scan_retry_timer);
+    }
+    s_scan_retry_timer = app_easy_timer(10, polar_deferred_retry_cb);
 }
 
 /*
@@ -701,6 +922,7 @@ static void polar_retry_if_needed(void)
 bool pp_imu_polar_init(void)
 {
     polar_reset();
+    polar_log("init");
     polar_start_scan();
     return true;
 }
@@ -762,6 +984,7 @@ void pp_imu_polar_on_adv_report(struct gapm_adv_report_ind const *param)
                sizeof(struct bd_addr));
         s_polar.target_addr_type = param->report.adv_addr_type;
         s_polar.state = POLAR_CONNECTING;
+        polar_log("adv match");
 
         /* Cancel scan — completion callback will trigger connect */
         struct gapm_cancel_cmd *cmd = KE_MSG_ALLOC(
@@ -774,8 +997,7 @@ void pp_imu_polar_on_adv_report(struct gapm_adv_report_ind const *param)
 void pp_imu_polar_on_scan_complete(uint8_t status)
 {
     pp_polar_scan_complete_action_t action;
-
-    (void)status;
+    polar_log_scan_complete(status, s_polar.state);
 
     if (s_stop_cancel_pending)
     {
@@ -809,6 +1031,7 @@ void pp_imu_polar_on_connect_failed(void)
     {
         return;
     }
+    polar_log("connect failed");
 
     if (s_connect_timer != EASY_TIMER_INVALID_TIMER)
     {
@@ -847,7 +1070,10 @@ bool pp_imu_polar_on_connection(uint8_t conidx,
     s_polar.conidx = conidx;
     s_polar.conhdl = param->conhdl;
     s_retry_cancel_pending = false;
+    polar_log_addr("peer", param->peer_addr_type, &param->peer_addr);
+    polar_log_state_change(s_polar.state, POLAR_WAIT_MTU, "connected");
     s_polar.state  = POLAR_WAIT_MTU;
+    polar_log_conn("connected", conidx, param->conhdl);
 
     if (s_stop_cancel_pending)
     {
@@ -862,6 +1088,7 @@ bool pp_imu_polar_on_connection(uint8_t conidx,
     }
 
     /* Initiate MTU exchange */
+    polar_log("mtu exch");
     struct gattc_exc_mtu_cmd *cmd = KE_MSG_ALLOC(
         GATTC_EXC_MTU_CMD,
         KE_BUILD_ID(TASK_GATTC, conidx), TASK_APP,
@@ -956,6 +1183,7 @@ bool pp_imu_polar_handle_message(ke_msg_id_t msgid,
         if (KE_IDX_GET(src_id) == s_polar.conidx)
         {
             s_polar.mtu = ind->mtu;
+            paddling_pulse_console_printf("POLAR: mtu=%u\r\n", s_polar.mtu);
             return true;
         }
     } break;
@@ -964,8 +1192,16 @@ bool pp_imu_polar_handle_message(ke_msg_id_t msgid,
     {
         const struct gapm_cmp_evt *evt = (const struct gapm_cmp_evt *)param;
 
+        if (evt->operation == GAPM_CONNECTION_DIRECT)
+        {
+            polar_log_status("connect cmp", evt->status);
+            polar_log_app_states("connect cmp");
+        }
+
         if (evt->operation == GAPM_CANCEL)
         {
+            polar_log_status("cancel cmp", evt->status);
+            polar_log_app_states("cancel cmp");
             bool connected = (s_polar.state >= POLAR_WAIT_MTU) &&
                              (s_polar.conidx != GAP_INVALID_CONIDX);
             bool stop_cancel_pending =
@@ -1001,11 +1237,17 @@ bool pp_imu_polar_handle_message(ke_msg_id_t msgid,
             }
         }
 
+        if (evt->operation == GAPM_SCAN_ACTIVE)
+        {
+            polar_log_status("scan cmp", evt->status);
+        }
+
         if (evt->operation == GAPM_CONNECTION_DIRECT &&
             evt->status != GAP_ERR_NO_ERROR &&
             evt->status != GAP_ERR_CANCELED &&
             s_polar.state == POLAR_CONNECTING)
         {
+            polar_log_status("connect cmp", evt->status);
             ke_state_set(TASK_APP, APP_CONNECTED);
             polar_retry_if_needed();
             return true;

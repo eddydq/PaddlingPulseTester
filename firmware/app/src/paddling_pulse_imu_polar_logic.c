@@ -1,53 +1,116 @@
 #include "paddling_pulse_imu_polar_logic.h"
 
-static uint16_t pp_polar_read_u16_le(const uint8_t *data)
+#define PP_POLAR_MAX_SETTING_VALUES 8
+
+enum
 {
-    return (uint16_t)data[0] | ((uint16_t)data[1] << 8);
+    PP_POLAR_SET_SAMPLE_RATE = 0x00,
+    PP_POLAR_SET_RESOLUTION = 0x01,
+    PP_POLAR_SET_RANGE = 0x02,
+    PP_POLAR_SET_RANGE_MILLIUNIT = 0x03,
+    PP_POLAR_SET_CHANNELS = 0x04,
+};
+
+typedef struct
+{
+    uint8_t count;
+    int32_t values[PP_POLAR_MAX_SETTING_VALUES];
+} pp_polar_setting_list_t;
+
+static uint8_t pp_polar_setting_field_size(uint8_t type)
+{
+    switch (type)
+    {
+    case PP_POLAR_SET_SAMPLE_RATE:
+    case PP_POLAR_SET_RESOLUTION:
+    case PP_POLAR_SET_RANGE:
+        return 2;
+
+    case PP_POLAR_SET_RANGE_MILLIUNIT:
+        return 4;
+
+    case PP_POLAR_SET_CHANNELS:
+        return 1;
+
+    default:
+        return 0;
+    }
 }
 
-static bool pp_polar_preferred_value(uint8_t type,
-                                     const uint8_t *values,
-                                     uint8_t value_count,
-                                     uint16_t *selected_value)
+static int32_t pp_polar_parse_signed_le(const uint8_t *data, uint8_t size)
 {
-    uint16_t preferred;
+    int32_t value = 0;
     uint8_t i;
 
-    if (selected_value == NULL || value_count == 0u)
+    for (i = 0; i < size; ++i)
+    {
+        value |= ((int32_t)data[i]) << (8u * i);
+    }
+
+    if (size < 4u && (data[size - 1u] & 0x80u) != 0u)
+    {
+        value |= (int32_t)(-1) << (8u * size);
+    }
+
+    return value;
+}
+
+static void pp_polar_setting_list_add(pp_polar_setting_list_t *list,
+                                      int32_t value)
+{
+    if (list != NULL && list->count < PP_POLAR_MAX_SETTING_VALUES)
+    {
+        list->values[list->count++] = value;
+    }
+}
+
+static int32_t pp_polar_select_setting(const pp_polar_setting_list_t *list,
+                                       int32_t preferred)
+{
+    uint8_t i;
+
+    if (list == NULL || list->count == 0u)
+    {
+        return -1;
+    }
+
+    for (i = 0; i < list->count; ++i)
+    {
+        if (list->values[i] == preferred)
+        {
+            return list->values[i];
+        }
+    }
+
+    return list->values[0];
+}
+
+static bool pp_polar_append_selected_tlv(pp_polar_acc_settings_t *out,
+                                         uint8_t type,
+                                         int32_t value)
+{
+    uint8_t field_size = pp_polar_setting_field_size(type);
+    uint8_t i;
+
+    if (out == NULL || field_size == 0u)
     {
         return false;
     }
 
-    switch (type)
+    if ((uint16_t)out->tlv_len + 2u + field_size > PP_POLAR_ACC_TLV_MAX_LEN)
     {
-    case 0x00:
-        preferred = 52;
-        break;
-    case 0x01:
-        preferred = 16;
-        break;
-    case 0x02:
-        preferred = 8;
-        break;
-    case 0x04:
-        preferred = 3;
-        break;
-    default:
-        *selected_value = pp_polar_read_u16_le(values);
-        return true;
+        return false;
     }
 
-    for (i = 0; i < value_count; ++i)
+    out->tlvs[out->tlv_len++] = type;
+    out->tlvs[out->tlv_len++] = 0x01;
+
+    for (i = 0; i < field_size; ++i)
     {
-        uint16_t value = pp_polar_read_u16_le(&values[(uint16_t)i * 2]);
-        if (value == preferred)
-        {
-            *selected_value = value;
-            return true;
-        }
+        out->tlvs[out->tlv_len++] = (uint8_t)((uint32_t)value >> (8u * i));
     }
 
-    *selected_value = pp_polar_read_u16_le(values);
+    out->tlv_count++;
     return true;
 }
 
@@ -55,6 +118,11 @@ bool pp_polar_parse_acc_settings(const uint8_t *data,
                                  uint16_t len,
                                  pp_polar_acc_settings_t *out)
 {
+    pp_polar_setting_list_t sample_rates = {0};
+    pp_polar_setting_list_t resolutions = {0};
+    pp_polar_setting_list_t ranges = {0};
+    pp_polar_setting_list_t range_milliunits = {0};
+    pp_polar_setting_list_t channels = {0};
     uint16_t pos;
 
     if (out == NULL || data == NULL)
@@ -71,11 +139,12 @@ bool pp_polar_parse_acc_settings(const uint8_t *data,
     {
         uint8_t type = data[pos];
         uint8_t value_count = data[pos + 1];
-        uint16_t value_bytes = (uint16_t)value_count * 2u;
+        uint8_t field_size = pp_polar_setting_field_size(type);
+        uint16_t value_bytes = (uint16_t)value_count * field_size;
         uint16_t next_pos = (uint16_t)(pos + 2u + value_bytes);
-        uint16_t selected;
+        uint8_t i;
 
-        if (value_count == 0u)
+        if (value_count == 0u || field_size == 0u)
         {
             return false;
         }
@@ -85,28 +154,97 @@ bool pp_polar_parse_acc_settings(const uint8_t *data,
             return false;
         }
 
-        if (!pp_polar_preferred_value(type, &data[pos + 2], value_count,
-                                      &selected))
+        pos = (uint16_t)(pos + 2u);
+        for (i = 0; i < value_count; ++i)
+        {
+            int32_t value = pp_polar_parse_signed_le(&data[pos], field_size);
+
+            switch (type)
+            {
+            case PP_POLAR_SET_SAMPLE_RATE:
+                pp_polar_setting_list_add(&sample_rates, value);
+                break;
+
+            case PP_POLAR_SET_RESOLUTION:
+                pp_polar_setting_list_add(&resolutions, value);
+                break;
+
+            case PP_POLAR_SET_RANGE:
+                pp_polar_setting_list_add(&ranges, value);
+                break;
+
+            case PP_POLAR_SET_RANGE_MILLIUNIT:
+                pp_polar_setting_list_add(&range_milliunits, value);
+                break;
+
+            case PP_POLAR_SET_CHANNELS:
+                pp_polar_setting_list_add(&channels, value);
+                break;
+
+            default:
+                return false;
+            }
+
+            pos = (uint16_t)(pos + field_size);
+        }
+
+        if (pos != next_pos)
         {
             return false;
         }
-        if (type == 0x00)
-        {
-            out->sample_rate_hz = selected;
-        }
+    }
 
-        if ((uint16_t)out->tlv_len + 4u > PP_POLAR_ACC_TLV_MAX_LEN)
+    if (pos != len)
+    {
+        return false;
+    }
+
+    if (sample_rates.count > 0u)
+    {
+        int32_t selected = pp_polar_select_setting(&sample_rates, 52);
+        out->sample_rate_hz = (uint16_t)selected;
+        if (!pp_polar_append_selected_tlv(out, PP_POLAR_SET_SAMPLE_RATE,
+                                          selected))
         {
             return false;
         }
+    }
 
-        out->tlvs[out->tlv_len++] = type;
-        out->tlvs[out->tlv_len++] = 0x01;
-        out->tlvs[out->tlv_len++] = (uint8_t)(selected & 0xFFu);
-        out->tlvs[out->tlv_len++] = (uint8_t)(selected >> 8);
-        out->tlv_count++;
+    if (resolutions.count > 0u)
+    {
+        int32_t selected = pp_polar_select_setting(&resolutions, 16);
+        if (!pp_polar_append_selected_tlv(out, PP_POLAR_SET_RESOLUTION,
+                                          selected))
+        {
+            return false;
+        }
+    }
 
-        pos = next_pos;
+    if (ranges.count > 0u)
+    {
+        int32_t selected = pp_polar_select_setting(&ranges, 8);
+        if (!pp_polar_append_selected_tlv(out, PP_POLAR_SET_RANGE, selected))
+        {
+            return false;
+        }
+    }
+    else if (range_milliunits.count > 0u)
+    {
+        int32_t selected = pp_polar_select_setting(&range_milliunits, -1);
+        if (!pp_polar_append_selected_tlv(out, PP_POLAR_SET_RANGE_MILLIUNIT,
+                                          selected))
+        {
+            return false;
+        }
+    }
+
+    if (channels.count > 0u)
+    {
+        int32_t selected = pp_polar_select_setting(&channels, 3);
+        if (!pp_polar_append_selected_tlv(out, PP_POLAR_SET_CHANNELS, selected))
+        {
+            return false;
+        }
     }
 
     return (pos == len);

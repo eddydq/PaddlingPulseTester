@@ -82,7 +82,7 @@
 #define APP_CSCP_DEVICE_APPEARANCE          (0x0484)
 
 /* Default simulated cadence until a real stroke source is connected */
-#define APP_CSCP_DEFAULT_CADENCE_RPM        (60)
+#define APP_CSCP_DEFAULT_CADENCE_RPM        (0)
 
 /* Manufacturer specific data constants */
 #define APP_AD_MSD_COMPANY_ID               (0xABCD)
