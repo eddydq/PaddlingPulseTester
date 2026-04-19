@@ -144,6 +144,57 @@ static void paddling_pulse_console_reply_iocfg(void)
 extern uint8_t current_cadence_rpm;
 extern bool imu_active;
 
+#ifdef CFG_IMU_DUAL
+static const char *const paddling_pulse_console_imu_override_names[] = {
+    "AUTO",
+    "LIS3DH",
+    "POLAR",
+};
+
+static const char *const paddling_pulse_console_imu_source_names[] = {
+    "NONE",
+    "LIS3DH",
+    "POLAR",
+};
+
+static const char *const paddling_pulse_console_imu_state_names[] = {
+    "IDLE",
+    "SEEKING",
+    "STREAMING",
+    "ACTIVE",
+};
+
+static const char *paddling_pulse_console_imu_override_name(pp_imu_override_t override)
+{
+    if ((uint8_t)override > (uint8_t)PP_IMU_OVERRIDE_POLAR)
+    {
+        override = PP_IMU_OVERRIDE_AUTO;
+    }
+
+    return paddling_pulse_console_imu_override_names[override];
+}
+
+static const char *paddling_pulse_console_imu_source_name(pp_imu_source_t source)
+{
+    if ((uint8_t)source > (uint8_t)PP_IMU_POLAR)
+    {
+        source = PP_IMU_NONE;
+    }
+
+    return paddling_pulse_console_imu_source_names[source];
+}
+
+static const char *paddling_pulse_console_imu_state_name(pp_imu_state_t state)
+{
+    if ((uint8_t)state > (uint8_t)PP_IMU_STATE_LIS3DH_ACTIVE)
+    {
+        state = PP_IMU_STATE_IDLE;
+    }
+
+    return paddling_pulse_console_imu_state_names[state];
+}
+#endif
+
 static void paddling_pulse_console_reply_cad(void)
 {
     char reply[PADDLING_PULSE_CONSOLE_REPLY_MAX_LEN];
@@ -159,13 +210,39 @@ static void paddling_pulse_console_reply_imu(void)
 {
     char reply[PADDLING_PULSE_CONSOLE_REPLY_MAX_LEN];
 
+#ifdef CFG_IMU_DUAL
+    snprintf(reply, sizeof(reply),
+             "\r\n+IMU: override=%s,source=%s,state=%s,rate=%u\r\nOK\r\n",
+             paddling_pulse_console_imu_override_name(pp_imu_manager_get_override()),
+             paddling_pulse_console_imu_source_name(pp_imu_manager_get_source()),
+             paddling_pulse_console_imu_state_name(pp_imu_manager_get_state()),
+             pp_imu_manager_get_rate_hz());
+#else
     snprintf(reply, sizeof(reply),
              "\r\n+IMU:%s,running=%u,samples=%u,rate=%uHz\r\nOK\r\n",
              pp_imu_get_name(),
              imu_active ? pp_imu_is_running() : 0,
              pp_sample_store_get_count(),
              pp_sample_store_get_rate_hz());
+#endif
     paddling_pulse_console_send_reply(reply);
+}
+
+static void paddling_pulse_console_set_imu(pp_imu_override_t target)
+{
+#ifdef CFG_IMU_DUAL
+    if (pp_imu_manager_set_override(target))
+    {
+        paddling_pulse_console_send_reply("\r\nOK\r\n");
+    }
+    else
+    {
+        paddling_pulse_console_reply_error();
+    }
+#else
+    (void)target;
+    paddling_pulse_console_reply_error();
+#endif
 }
 
 static void paddling_pulse_console_process(char *command, bool overflow)
@@ -197,6 +274,9 @@ static void paddling_pulse_console_process(char *command, bool overflow)
         return;
     case PP_CONSOLE_CMD_IMU_GET:
         paddling_pulse_console_reply_imu();
+        return;
+    case PP_CONSOLE_CMD_IMU_SET:
+        paddling_pulse_console_set_imu(parsed.imu_target);
         return;
     default:
         paddling_pulse_console_reply_error();

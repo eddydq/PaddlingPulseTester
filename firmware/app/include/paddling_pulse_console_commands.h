@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "paddling_pulse_imu_manager.h"
+
 typedef enum
 {
     PP_CONSOLE_CMD_NONE = 0,
@@ -12,12 +14,14 @@ typedef enum
     PP_CONSOLE_CMD_CAD_GET,
     PP_CONSOLE_CMD_CAD_SET,
     PP_CONSOLE_CMD_IMU_GET,
+    PP_CONSOLE_CMD_IMU_SET,
 } pp_console_command_kind_t;
 
 typedef struct
 {
     pp_console_command_kind_t kind;
     uint8_t cad_value;
+    pp_imu_override_t imu_target;
 } pp_console_command_t;
 
 bool pp_console_parse_command(const char *text, pp_console_command_t *out);
