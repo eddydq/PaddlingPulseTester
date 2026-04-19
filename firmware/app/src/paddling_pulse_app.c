@@ -49,10 +49,10 @@
 #include "app_easy_timer.h"
 #include "paddling_pulse_app.h"
 #include "paddling_pulse_console.h"
+#include "paddling_pulse_console_io.h"
 #include "paddling_pulse_imu.h"
 #include "paddling_pulse_sample_store.h"
 #include "paddling_pulse_stroke_rate.h"
-#include "arch_console.h"
 #include "co_bt.h"
 #include "app_cscps.h"
 
@@ -244,9 +244,9 @@ static void stroke_rate_timer_cb(void)
     pp_stroke_rate_update();
 
 #ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
-    arch_printf("SR: rpm=%u samples=%u\r\n",
-                pp_stroke_rate_get_rpm(),
-                pp_sample_store_get_count());
+    paddling_pulse_console_printf("SR: rpm=%u samples=%u\r\n",
+                                  pp_stroke_rate_get_rpm(),
+                                  pp_sample_store_get_count());
 #endif
 
     app_stroke_rate_timer_used = app_easy_timer(APP_STROKE_RATE_TO, stroke_rate_timer_cb);
@@ -274,8 +274,8 @@ static void csc_meas_timer_cb(void)
         app_cscps_ntf_csc_meas_req(app_connection_idx, &csc_meas_state);
 
 #ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
-        arch_printf("CSC: rpm=%u rev=%u time=%u\r\n",
-                    cadence, drev, dticks);
+        paddling_pulse_console_printf("CSC: rpm=%u rev=%u time=%u\r\n",
+                                      cadence, drev, dticks);
 #endif
     }
 
@@ -299,7 +299,7 @@ static void pipeline_start(void)
 #ifdef CFG_PADDLING_PULSE_CONSOLE_MODE
     else
     {
-        arch_printf("IMU: init failed, using manual cadence\r\n");
+        paddling_pulse_console_printf("IMU: init failed, using manual cadence\r\n");
     }
 #endif
 

@@ -15,6 +15,11 @@
 #include "ke_msg.h"
 #include "paddling_pulse_board.h"
 #include "paddling_pulse_console.h"
+#include "paddling_pulse_console_commands.h"
+#include "paddling_pulse_console_io.h"
+#include "paddling_pulse_imu.h"
+#include "paddling_pulse_sample_store.h"
+#include "paddling_pulse_stroke_rate.h"
 #include "uart.h"
 
 #if defined(CFG_PADDLING_PULSE_AT_COMMANDS)
@@ -48,14 +53,7 @@ static void paddling_pulse_console_arm_rx(void)
 
 static void paddling_pulse_console_send_reply(const char *reply)
 {
-#if defined(CFG_UART_ONE_WIRE_SUPPORT)
-    uart_one_wire_tx_en(UART1);
-#endif
-    uart_send(UART1, (const uint8_t *)reply, (uint16_t)strlen(reply), UART_OP_BLOCKING);
-    uart_wait_tx_finish(UART1);
-#if defined(CFG_UART_ONE_WIRE_SUPPORT)
-    uart_one_wire_rx_en(UART1);
-#endif
+    paddling_pulse_console_write(reply);
 }
 
 static void paddling_pulse_console_reset_input(void)
@@ -112,37 +110,6 @@ static void paddling_pulse_console_trim(char *text)
     text[end - start] = '\0';
 }
 
-static char paddling_pulse_console_upper(char ch)
-{
-    if ((ch >= 'a') && (ch <= 'z'))
-    {
-        return (char)(ch - ('a' - 'A'));
-    }
-
-    return ch;
-}
-
-static bool paddling_pulse_console_match_query(const char *command, const char *token)
-{
-    while ((*command != '\0') && (*token != '\0'))
-    {
-        if (paddling_pulse_console_upper(*command) != paddling_pulse_console_upper(*token))
-        {
-            return false;
-        }
-
-        command++;
-        token++;
-    }
-
-    if (*token != '\0')
-    {
-        return false;
-    }
-
-    return (*command == '\0') || ((*command == '?') && (command[1] == '\0'));
-}
-
 static void paddling_pulse_console_reply_error(void)
 {
     paddling_pulse_console_send_reply("\r\nERROR\r\n");
@@ -174,29 +141,67 @@ static void paddling_pulse_console_reply_iocfg(void)
     paddling_pulse_console_send_reply(reply);
 }
 
+extern uint8_t current_cadence_rpm;
+extern bool imu_active;
+
+static void paddling_pulse_console_reply_cad(void)
+{
+    char reply[PADDLING_PULSE_CONSOLE_REPLY_MAX_LEN];
+    uint8_t algo_rpm = pp_stroke_rate_get_rpm();
+
+    snprintf(reply, sizeof(reply),
+             "\r\n+CAD:%u,algo=%u\r\nOK\r\n",
+             current_cadence_rpm, algo_rpm);
+    paddling_pulse_console_send_reply(reply);
+}
+
+static void paddling_pulse_console_reply_imu(void)
+{
+    char reply[PADDLING_PULSE_CONSOLE_REPLY_MAX_LEN];
+
+    snprintf(reply, sizeof(reply),
+             "\r\n+IMU:%s,running=%u,samples=%u,rate=%uHz\r\nOK\r\n",
+             pp_imu_get_name(),
+             imu_active ? pp_imu_is_running() : 0,
+             pp_sample_store_get_count(),
+             pp_sample_store_get_rate_hz());
+    paddling_pulse_console_send_reply(reply);
+}
+
 static void paddling_pulse_console_process(char *command, bool overflow)
 {
+    pp_console_command_t parsed = {0};
+
     paddling_pulse_console_trim(command);
 
-    if (overflow || (command[0] == '\0'))
+    if (overflow || !pp_console_parse_command(command, &parsed))
     {
         paddling_pulse_console_reply_error();
         return;
     }
 
-    if (paddling_pulse_console_match_query(command, "AT+BATT"))
+    switch (parsed.kind)
     {
+    case PP_CONSOLE_CMD_BATT_GET:
         paddling_pulse_console_reply_batt();
         return;
-    }
-
-    if (paddling_pulse_console_match_query(command, "AT+IOCFG"))
-    {
+    case PP_CONSOLE_CMD_IOCFG_GET:
         paddling_pulse_console_reply_iocfg();
         return;
+    case PP_CONSOLE_CMD_CAD_GET:
+        paddling_pulse_console_reply_cad();
+        return;
+    case PP_CONSOLE_CMD_CAD_SET:
+        current_cadence_rpm = parsed.cad_value;
+        paddling_pulse_console_send_reply("\r\nOK\r\n");
+        return;
+    case PP_CONSOLE_CMD_IMU_GET:
+        paddling_pulse_console_reply_imu();
+        return;
+    default:
+        paddling_pulse_console_reply_error();
+        return;
     }
-
-    paddling_pulse_console_reply_error();
 }
 
 static void paddling_pulse_console_rx_cb(uint16_t status)
