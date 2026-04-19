@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd.exe /C \"where make\")",
+      "Bash(cmd.exe /C \"where mingw32-make\")",
+      "Bash(cmd.exe /C \"mingw32-make clean && mingw32-make build\")",
+      "Bash(cmd.exe /C \"cd /d C:\\\\dev\\\\_work\\\\PaddlingPulse && mingw32-make clean 2>&1 && mingw32-make build 2>&1\")",
+      "Bash(rm \"C:/Users/eddyd/.claude/projects/c--dev--work-PaddlingPulse/memory/feedback_build_task.md\")",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(mingw32-make)",
+      "Read(//c/dev/_sdks/DA145xx_SDK/6.0.24.1464/sdk/platform/driver/i2c/**)"
+    ]
+  }
+}

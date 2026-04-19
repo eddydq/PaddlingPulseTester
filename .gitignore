@@ -1,3 +1,7 @@
 build/
 config/local.mk
 config/local/
+tests/
+.superpowers/
+.pytest_cache/
+analysis/
