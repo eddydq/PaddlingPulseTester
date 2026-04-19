@@ -54,6 +54,7 @@ bool pp_polar_parse_acc_settings(const uint8_t *data,
     }
 
     out->sample_rate_hz = 52;
+    out->tlv_count = 0;
     out->tlv_len = 0;
 
     pos = 0;
@@ -81,10 +82,11 @@ bool pp_polar_parse_acc_settings(const uint8_t *data,
             return false;
         }
 
-        out->tlv[out->tlv_len++] = type;
-        out->tlv[out->tlv_len++] = 0x01;
-        out->tlv[out->tlv_len++] = (uint8_t)(selected & 0xFFu);
-        out->tlv[out->tlv_len++] = (uint8_t)(selected >> 8);
+        out->tlvs[out->tlv_len++] = type;
+        out->tlvs[out->tlv_len++] = 0x01;
+        out->tlvs[out->tlv_len++] = (uint8_t)(selected & 0xFFu);
+        out->tlvs[out->tlv_len++] = (uint8_t)(selected >> 8);
+        out->tlv_count++;
 
         pos = next_pos;
     }
@@ -92,10 +94,11 @@ bool pp_polar_parse_acc_settings(const uint8_t *data,
     return true;
 }
 
-bool pp_polar_disconnect_is_owned(uint16_t owned_conhdl,
-                                  uint16_t disconnect_conhdl)
+bool pp_polar_disconnect_is_owned(uint16_t tracked_conhdl,
+                                  uint16_t event_conhdl,
+                                  bool idle)
 {
-    return (owned_conhdl != 0u) && (owned_conhdl == disconnect_conhdl);
+    return !idle && (tracked_conhdl != 0u) && (tracked_conhdl == event_conhdl);
 }
 
 pp_polar_cancel_action_t pp_polar_cancel_action(bool stop_requested,
@@ -103,13 +106,13 @@ pp_polar_cancel_action_t pp_polar_cancel_action(bool stop_requested,
 {
     if (stop_requested)
     {
-        return PP_POLAR_CANCEL_ACTION_RESET;
+        return PP_POLAR_CANCEL_RESET;
     }
 
     if (retry_requested)
     {
-        return PP_POLAR_CANCEL_ACTION_RETRY;
+        return PP_POLAR_CANCEL_RETRY;
     }
 
-    return PP_POLAR_CANCEL_ACTION_NONE;
+    return PP_POLAR_CANCEL_NONE;
 }
