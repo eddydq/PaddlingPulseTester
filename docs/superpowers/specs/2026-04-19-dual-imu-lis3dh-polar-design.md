@@ -107,7 +107,10 @@ single-IMU configs.
   candidate-buffering + RSSI pick on a `PP_POLAR_RSSI_WINDOW_MS` timer.
 - Expose `pp_imu_polar_get_actual_sample_rate_hz()` accessor so the
   manager can re-init the sample store with the rate the strap actually
-  negotiated (fixes the 52-Hz-hardcode latent bug).
+  negotiated (fixes the 52-Hz-hardcode latent bug). **Contract:** the
+  returned value is meaningful only after the manager has received
+  `ON_STREAMING`; the Polar driver latches the rate during PMD settings
+  response parsing, before emitting `ON_STREAMING`.
 - Emit `ON_STREAMING` / `ON_DISCONNECT` / `ON_SCAN_FAIL` events to the
   manager when `CFG_IMU_DUAL` is defined. Under `CFG_IMU_POLAR` alone, the
   callbacks remain inert (existing behavior preserved).
@@ -152,11 +155,20 @@ States: `IDLE`, `POLAR_SEEKING`, `POLAR_ACTIVE`, `LIS3DH_ACTIVE`.
 | POLAR_SEEKING | timer | override = POLAR | POLAR_SEEKING | rearm timer, keep scanning |
 | POLAR_ACTIVE | `ON_DISCONNECT` | — | POLAR_SEEKING | stop pushing samples, arm `RECONNECT_TIMEOUT` only if override=AUTO, rescan |
 | LIS3DH_ACTIVE / POLAR_ACTIVE | `pipeline_stop` | — | IDLE | stop current IMU, clear store |
-| any | `AT+IMU=X` (override change) | new source ≠ current | re-enter via IDLE | atomic switch sequence |
+| POLAR_ACTIVE | `AT+IMU=LIS3DH` | — | LIS3DH_ACTIVE | internal `pipeline_stop` → `pipeline_start` (atomic switch sequence) |
+| LIS3DH_ACTIVE | `AT+IMU=POLAR` | — | POLAR_SEEKING | internal `pipeline_stop` → `pipeline_start` (atomic switch sequence) |
+| POLAR_SEEKING | `AT+IMU=LIS3DH` | — | LIS3DH_ACTIVE | cancel Polar scan, start LIS3DH |
+| any | `AT+IMU=<same-as-current-source>` | — | unchanged | persist override only; do not restart IMU |
 
 Reconnect to the same strap at the same rate does **not** clear the store
 or reset the Kalman filter — warm state is preserved for faster cadence
 reacquisition.
+
+**Cold-boot behavior:** retained RAM is uninitialized on battery removal
+or VBAT drop. On cold boot, the `__SECTION_ZERO` attribute zeros the
+override field, which equals `PP_IMU_OVR_AUTO` (the zero enumerator).
+Warm resets preserve the override. Documented so the "persistent across
+reset" behavior has clear bounds.
 
 ### Per-IMU parameter struct
 
