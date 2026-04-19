@@ -51,6 +51,12 @@
 #include "paddling_pulse_console.h"
 #include "paddling_pulse_console_io.h"
 #include "paddling_pulse_imu.h"
+#if defined(CFG_IMU_LIS3DH) || defined(CFG_IMU_MPU6050)
+#include "paddling_pulse_imu_lis3dh.h"
+#endif
+#ifdef CFG_IMU_POLAR
+#include "paddling_pulse_imu_polar.h"
+#endif
 #include "paddling_pulse_sample_store.h"
 #include "paddling_pulse_stroke_rate.h"
 #include "co_bt.h"
@@ -284,12 +290,19 @@ static void csc_meas_timer_cb(void)
 
 static void pipeline_start(void)
 {
-#ifdef CFG_IMU_POLAR
-    pp_sample_store_init(52);
-#else
-    pp_sample_store_init(100);
+#if defined(CFG_IMU_LIS3DH)
+    const pp_stroke_rate_params_t *params = &pp_imu_lis3dh_params;
+    uint16_t rate_hz = params->sample_rate_hz;
+#elif defined(CFG_IMU_POLAR)
+    const pp_stroke_rate_params_t *params = &pp_imu_polar_params;
+    uint16_t rate_hz = params->sample_rate_hz;
+#elif defined(CFG_IMU_MPU6050)
+    const pp_stroke_rate_params_t *params = &pp_imu_lis3dh_params;
+    uint16_t rate_hz = params->sample_rate_hz;
 #endif
-    pp_stroke_rate_init();
+
+    pp_sample_store_init(rate_hz);
+    pp_stroke_rate_init(params);
 
     imu_active = pp_imu_init();
     if (imu_active)

@@ -32,6 +32,34 @@
 #include <string.h>
 
 /*
+ * Arm-mounted accelerometer tuning. Arm swing amplitudes are larger than
+ * boat swing, so the window and energy floor are adjusted accordingly.
+ */
+const pp_stroke_rate_params_t pp_imu_polar_params = {
+#if defined(CFG_IMU_AXIS_X)
+    .axis = PP_AXIS_X,
+#elif defined(CFG_IMU_AXIS_Y)
+    .axis = PP_AXIS_Y,
+#else
+    .axis = PP_AXIS_Z,
+#endif
+    .sample_rate_hz               = PP_STROKE_RATE_DEFAULT_POLAR_HZ,
+    .window_samples               = PP_STROKE_RATE_WINDOW_POLAR,
+    .min_rpm                      = PP_STROKE_RATE_MIN_RPM,
+    .max_rpm                      = PP_STROKE_RATE_MAX_RPM,
+    .kalman_q                     = PP_KALMAN_Q,
+    .kalman_r                     = PP_KALMAN_R,
+    .kalman_p_max                 = PP_KALMAN_P_MAX,
+    .autocorr_confidence_min      = PP_AUTOCORR_CONFIDENCE_MIN,
+    .autocorr_energy_min          = PP_AUTOCORR_ENERGY_MIN * PP_STROKE_RATE_POLAR_ENERGY_SCALE,
+    .autocorr_harmonic_pct        = PP_AUTOCORR_HARMONIC_PCT,
+    .kalman_confirm_tolerance_rpm = PP_KALMAN_CONFIRM_TOLERANCE_RPM,
+    .kalman_max_jump_rpm          = PP_KALMAN_MAX_JUMP_RPM,
+    .kalman_invalid_max           = PP_KALMAN_INVALID_MAX,
+    .kalman_confirm_count         = PP_KALMAN_CONFIRM_COUNT,
+};
+
+/*
  * CONSTANTS
  */
 
@@ -500,16 +528,39 @@ static int32_t polar_parse_signed_bits(const uint8_t *data,
     return val;
 }
 
+static int16_t polar_clamp_sample(int32_t value)
+{
+    if (value > INT16_MAX)
+    {
+        return INT16_MAX;
+    }
+    if (value < INT16_MIN)
+    {
+        return INT16_MIN;
+    }
+    return (int16_t)value;
+}
+
 static void polar_store_sample(int32_t x, int32_t y, int32_t z)
 {
     int16_t sample;
-#if defined(CFG_IMU_AXIS_X)
-    sample = (x > 32767) ? 32767 : (x < -32768) ? -32768 : (int16_t)x;
-#elif defined(CFG_IMU_AXIS_Y)
-    sample = (y > 32767) ? 32767 : (y < -32768) ? -32768 : (int16_t)y;
-#elif defined(CFG_IMU_AXIS_Z)
-    sample = (z > 32767) ? 32767 : (z < -32768) ? -32768 : (int16_t)z;
-#endif
+
+    switch (pp_imu_polar_params.axis)
+    {
+    case PP_AXIS_X:
+        sample = polar_clamp_sample(x);
+        break;
+
+    case PP_AXIS_Y:
+        sample = polar_clamp_sample(y);
+        break;
+
+    case PP_AXIS_Z:
+    default:
+        sample = polar_clamp_sample(z);
+        break;
+    }
+
     pp_sample_store_push(sample);
 }
 
@@ -610,7 +661,7 @@ static void polar_handle_cp_event(const uint8_t *value, uint16_t length)
     {
         memset(&parsed, 0, sizeof(parsed));
         s_polar.acc_selected_tlvs_len = 0;
-        s_polar.acc_sample_rate_hz = 52;
+        s_polar.acc_sample_rate_hz = PP_STROKE_RATE_DEFAULT_POLAR_HZ;
 
         /* Parse settings from response params */
         if ((length > 5) &&
@@ -634,6 +685,15 @@ static void polar_handle_cp_event(const uint8_t *value, uint16_t length)
     {
         polar_log_state_change(s_polar.state, POLAR_STREAMING, "streaming");
         s_polar.state = POLAR_STREAMING;
+
+        {
+            uint16_t actual_rate_hz = pp_imu_polar_get_actual_sample_rate_hz();
+            if (actual_rate_hz != pp_sample_store_get_rate_hz())
+            {
+                pp_sample_store_init(actual_rate_hz);
+                pp_stroke_rate_init(&pp_imu_polar_params);
+            }
+        }
     }
     else
     {
@@ -969,6 +1029,16 @@ void pp_imu_polar_stop(void)
 bool pp_imu_polar_is_running(void)
 {
     return (s_polar.state == POLAR_STREAMING);
+}
+
+uint16_t pp_imu_polar_get_actual_sample_rate_hz(void)
+{
+    if (s_polar.acc_sample_rate_hz == 0u)
+    {
+        return PP_STROKE_RATE_DEFAULT_POLAR_HZ;
+    }
+
+    return s_polar.acc_sample_rate_hz;
 }
 
 /*

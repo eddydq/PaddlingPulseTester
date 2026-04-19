@@ -2,6 +2,9 @@
 #define _PADDLING_PULSE_IMU_LIS3DH_H_
 
 #include <stdbool.h>
+#include "paddling_pulse_stroke_rate.h"
+
+extern const pp_stroke_rate_params_t pp_imu_lis3dh_params;
 
 bool pp_imu_lis3dh_init(void);
 void pp_imu_lis3dh_start(void);

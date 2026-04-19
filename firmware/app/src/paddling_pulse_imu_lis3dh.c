@@ -7,9 +7,42 @@
 
 #include "da14531_config_basic.h"
 
-#ifdef CFG_IMU_LIS3DH
+#if defined(CFG_IMU_LIS3DH) || defined(CFG_IMU_MPU6050)
 
 #include "paddling_pulse_imu_lis3dh.h"
+
+/*
+ * Boat-mounted accelerometer tuning. Axis Z is up/down with the
+ * paddler cadence signature dominating the low-frequency band.
+ */
+const pp_stroke_rate_params_t pp_imu_lis3dh_params = {
+#if defined(CFG_IMU_AXIS_X)
+    .axis = PP_AXIS_X,
+#elif defined(CFG_IMU_AXIS_Y)
+    .axis = PP_AXIS_Y,
+#else
+    .axis = PP_AXIS_Z,
+#endif
+    .sample_rate_hz               = PP_STROKE_RATE_DEFAULT_LIS3DH_HZ,
+    .window_samples               = PP_STROKE_RATE_WINDOW,
+    .min_rpm                      = PP_STROKE_RATE_MIN_RPM,
+    .max_rpm                      = PP_STROKE_RATE_MAX_RPM,
+    .kalman_q                     = PP_KALMAN_Q,
+    .kalman_r                     = PP_KALMAN_R,
+    .kalman_p_max                 = PP_KALMAN_P_MAX,
+    .autocorr_confidence_min      = PP_AUTOCORR_CONFIDENCE_MIN,
+    .autocorr_energy_min          = PP_AUTOCORR_ENERGY_MIN,
+    .autocorr_harmonic_pct        = PP_AUTOCORR_HARMONIC_PCT,
+    .kalman_confirm_tolerance_rpm = PP_KALMAN_CONFIRM_TOLERANCE_RPM,
+    .kalman_max_jump_rpm          = PP_KALMAN_MAX_JUMP_RPM,
+    .kalman_invalid_max           = PP_KALMAN_INVALID_MAX,
+    .kalman_confirm_count         = PP_KALMAN_CONFIRM_COUNT,
+};
+
+#endif
+
+#ifdef CFG_IMU_LIS3DH
+
 #include "paddling_pulse_sample_store.h"
 #include "paddling_pulse_board.h"
 #include "i2c.h"
@@ -176,15 +209,26 @@ void pp_imu_lis3dh_process(void)
     uint8_t i;
     for (i = 0; i < fifo_count; i++)
     {
+        int16_t x = (int16_t)((int8_t)buf[i * 6 + 1]);
+        int16_t y = (int16_t)((int8_t)buf[i * 6 + 3]);
+        int16_t z = (int16_t)((int8_t)buf[i * 6 + 5]);
         int16_t sample;
-        /* 8-bit LP mode: only high byte is valid per axis */
-#if defined(CFG_IMU_AXIS_X)
-        sample = (int16_t)((int8_t)buf[i * 6 + 1]);   /* OUT_X_H */
-#elif defined(CFG_IMU_AXIS_Y)
-        sample = (int16_t)((int8_t)buf[i * 6 + 3]);   /* OUT_Y_H */
-#elif defined(CFG_IMU_AXIS_Z)
-        sample = (int16_t)((int8_t)buf[i * 6 + 5]);   /* OUT_Z_H */
-#endif
+
+        switch (pp_imu_lis3dh_params.axis)
+        {
+        case PP_AXIS_X:
+            sample = x;
+            break;
+
+        case PP_AXIS_Y:
+            sample = y;
+            break;
+
+        case PP_AXIS_Z:
+        default:
+            sample = z;
+            break;
+        }
         pp_sample_store_push(sample);
     }
 }
