@@ -773,6 +773,8 @@ void pp_imu_polar_on_adv_report(struct gapm_adv_report_ind const *param)
 
 void pp_imu_polar_on_scan_complete(uint8_t status)
 {
+    pp_polar_scan_complete_action_t action;
+
     (void)status;
 
     if (s_stop_cancel_pending)
@@ -782,12 +784,16 @@ void pp_imu_polar_on_scan_complete(uint8_t status)
         return;
     }
 
-    if (s_polar.state == POLAR_CONNECTING)
+    action = pp_polar_scan_complete_action(
+        false,
+        s_polar.state == POLAR_CONNECTING,
+        s_polar.state == POLAR_SCANNING);
+
+    if (action == PP_POLAR_SCAN_COMPLETE_DEFER_CONNECT)
     {
-        /* Deferred connect to avoid calling GAP within GAP callback */
         app_easy_timer(1, polar_deferred_connect_cb);
     }
-    else if (s_polar.state == POLAR_SCANNING)
+    else if (action == PP_POLAR_SCAN_COMPLETE_RETRY)
     {
         /* Scan timed out — retry */
         s_polar.state = POLAR_IDLE;
@@ -797,6 +803,8 @@ void pp_imu_polar_on_scan_complete(uint8_t status)
 
 void pp_imu_polar_on_connect_failed(void)
 {
+    pp_polar_stop_completion_action_t action;
+
     if (s_polar.state != POLAR_CONNECTING)
     {
         return;
@@ -810,7 +818,8 @@ void pp_imu_polar_on_connect_failed(void)
 
     ke_state_set(TASK_APP, APP_CONNECTED);
 
-    if (s_stop_cancel_pending)
+    action = pp_polar_stop_completion_action(s_stop_cancel_pending);
+    if (action == PP_POLAR_STOP_COMPLETION_RESET)
     {
         s_stop_cancel_pending = false;
         polar_reset();
@@ -840,6 +849,18 @@ bool pp_imu_polar_on_connection(uint8_t conidx,
     s_retry_cancel_pending = false;
     s_polar.state  = POLAR_WAIT_MTU;
 
+    if (s_stop_cancel_pending)
+    {
+        struct gapc_disconnect_cmd *cmd = KE_MSG_ALLOC(
+            GAPC_DISCONNECT_CMD,
+            KE_BUILD_ID(TASK_GAPC, conidx), TASK_APP,
+            gapc_disconnect_cmd);
+        cmd->operation = GAPC_DISCONNECT;
+        cmd->reason    = CO_ERROR_REMOTE_USER_TERM_CON;
+        KE_MSG_SEND(cmd);
+        return true;
+    }
+
     /* Initiate MTU exchange */
     struct gattc_exc_mtu_cmd *cmd = KE_MSG_ALLOC(
         GATTC_EXC_MTU_CMD,
@@ -854,11 +875,14 @@ bool pp_imu_polar_on_connection(uint8_t conidx,
 
 bool pp_imu_polar_on_disconnect(uint16_t conhdl)
 {
+    pp_polar_stop_completion_action_t action;
+
     if (!pp_polar_disconnect_is_owned(s_polar.conhdl, conhdl,
                                       s_polar.state == POLAR_IDLE))
         return false;
 
-    if (s_stop_cancel_pending)
+    action = pp_polar_stop_completion_action(s_stop_cancel_pending);
+    if (action == PP_POLAR_STOP_COMPLETION_RESET)
     {
         s_stop_cancel_pending = false;
         polar_reset();
@@ -942,8 +966,10 @@ bool pp_imu_polar_handle_message(ke_msg_id_t msgid,
 
         if (evt->operation == GAPM_CANCEL)
         {
+            bool connected = (s_polar.state >= POLAR_WAIT_MTU) &&
+                             (s_polar.conidx != GAP_INVALID_CONIDX);
             bool stop_cancel_pending =
-                s_stop_cancel_pending &&
+                pp_polar_cancel_should_reset(s_stop_cancel_pending, connected) &&
                 (s_polar.state == POLAR_SCANNING ||
                  s_polar.state == POLAR_CONNECTING);
             bool retry_cancel_pending =
@@ -952,6 +978,11 @@ bool pp_imu_polar_handle_message(ke_msg_id_t msgid,
             pp_polar_cancel_action_t action =
                 pp_polar_cancel_action(stop_cancel_pending,
                                        retry_cancel_pending);
+
+            if (s_stop_cancel_pending && connected)
+            {
+                return true;
+            }
 
             switch (action)
             {

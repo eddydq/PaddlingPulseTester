@@ -134,3 +134,38 @@ pp_polar_cancel_action_t pp_polar_cancel_action(bool stop_requested,
 
     return PP_POLAR_CANCEL_NONE;
 }
+
+pp_polar_scan_complete_action_t pp_polar_scan_complete_action(
+    bool stop_requested,
+    bool connecting,
+    bool scanning)
+{
+    if (stop_requested)
+    {
+        return PP_POLAR_SCAN_COMPLETE_NONE;
+    }
+
+    if (connecting)
+    {
+        return PP_POLAR_SCAN_COMPLETE_DEFER_CONNECT;
+    }
+
+    if (scanning)
+    {
+        return PP_POLAR_SCAN_COMPLETE_RETRY;
+    }
+
+    return PP_POLAR_SCAN_COMPLETE_NONE;
+}
+
+pp_polar_stop_completion_action_t pp_polar_stop_completion_action(
+    bool stop_requested)
+{
+    return stop_requested ? PP_POLAR_STOP_COMPLETION_RESET
+                          : PP_POLAR_STOP_COMPLETION_RETRY;
+}
+
+bool pp_polar_cancel_should_reset(bool stop_requested, bool connected)
+{
+    return stop_requested && !connected;
+}

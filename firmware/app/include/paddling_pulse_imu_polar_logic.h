@@ -21,6 +21,19 @@ typedef enum
     PP_POLAR_CANCEL_RETRY,
 } pp_polar_cancel_action_t;
 
+typedef enum
+{
+    PP_POLAR_SCAN_COMPLETE_NONE = 0,
+    PP_POLAR_SCAN_COMPLETE_DEFER_CONNECT,
+    PP_POLAR_SCAN_COMPLETE_RETRY,
+} pp_polar_scan_complete_action_t;
+
+typedef enum
+{
+    PP_POLAR_STOP_COMPLETION_RESET = 0,
+    PP_POLAR_STOP_COMPLETION_RETRY,
+} pp_polar_stop_completion_action_t;
+
 bool pp_polar_parse_acc_settings(const uint8_t *data,
                                  uint16_t len,
                                  pp_polar_acc_settings_t *out);
@@ -31,5 +44,15 @@ bool pp_polar_disconnect_is_owned(uint16_t tracked_conhdl,
 
 pp_polar_cancel_action_t pp_polar_cancel_action(bool stop_requested,
                                                 bool retry_requested);
+
+pp_polar_scan_complete_action_t pp_polar_scan_complete_action(
+    bool stop_requested,
+    bool connecting,
+    bool scanning);
+
+pp_polar_stop_completion_action_t pp_polar_stop_completion_action(
+    bool stop_requested);
+
+bool pp_polar_cancel_should_reset(bool stop_requested, bool connected);
 
 #endif

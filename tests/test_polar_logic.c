@@ -82,11 +82,43 @@ static void test_cancel_actions_distinguish_stop_vs_retry(void)
     assert(pp_polar_cancel_action(true, true) == PP_POLAR_CANCEL_RESET);
 }
 
+static void test_scan_complete_actions_honor_stop_and_state(void)
+{
+    assert(pp_polar_scan_complete_action(true, false, true) ==
+           PP_POLAR_SCAN_COMPLETE_NONE);
+    assert(pp_polar_scan_complete_action(true, true, false) ==
+           PP_POLAR_SCAN_COMPLETE_NONE);
+    assert(pp_polar_scan_complete_action(false, true, false) ==
+           PP_POLAR_SCAN_COMPLETE_DEFER_CONNECT);
+    assert(pp_polar_scan_complete_action(false, false, true) ==
+           PP_POLAR_SCAN_COMPLETE_RETRY);
+    assert(pp_polar_scan_complete_action(false, false, false) ==
+           PP_POLAR_SCAN_COMPLETE_NONE);
+}
+
+static void test_stop_completion_actions_distinguish_reset_and_retry(void)
+{
+    assert(pp_polar_stop_completion_action(true) ==
+           PP_POLAR_STOP_COMPLETION_RESET);
+    assert(pp_polar_stop_completion_action(false) ==
+           PP_POLAR_STOP_COMPLETION_RETRY);
+}
+
+static void test_cancel_reset_is_blocked_once_connected(void)
+{
+    assert(pp_polar_cancel_should_reset(true, false));
+    assert(!pp_polar_cancel_should_reset(true, true));
+    assert(!pp_polar_cancel_should_reset(false, false));
+}
+
 int main(void)
 {
     test_prefers_52hz_16bit_8g_xyz();
     test_claims_only_the_matching_disconnect();
     test_rejects_malformed_acc_settings();
     test_cancel_actions_distinguish_stop_vs_retry();
+    test_scan_complete_actions_honor_stop_and_state();
+    test_stop_completion_actions_distinguish_reset_and_retry();
+    test_cancel_reset_is_blocked_once_connected();
     return 0;
 }
