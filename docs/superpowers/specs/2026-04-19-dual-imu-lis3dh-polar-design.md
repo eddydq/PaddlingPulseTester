@@ -84,7 +84,7 @@ defined. Only the dual-IMU build introduces the manager indirection.
 **New: `paddling_pulse_imu_manager` (.h + .c).** Owns:
 
 - `enum pp_imu_source { PP_IMU_NONE, PP_IMU_LIS3DH, PP_IMU_POLAR }`.
-- `enum pp_imu_override { PP_IMU_OVR_AUTO, PP_IMU_OVR_LIS3DH, PP_IMU_OVR_POLAR }`.
+- `enum pp_imu_override { PP_IMU_OVERRIDE_AUTO, PP_IMU_OVERRIDE_LIS3DH, PP_IMU_OVERRIDE_POLAR }`.
 - The selection state machine (below).
 - Public entry points called from `paddling_pulse_app.c`:
   `pp_imu_manager_init`, `pp_imu_manager_start`, `pp_imu_manager_stop`,
@@ -166,7 +166,7 @@ reacquisition.
 
 **Cold-boot behavior:** retained RAM is uninitialized on battery removal
 or VBAT drop. On cold boot, the `__SECTION_ZERO` attribute zeros the
-override field, which equals `PP_IMU_OVR_AUTO` (the zero enumerator).
+override field, which equals `PP_IMU_OVERRIDE_AUTO` (the zero enumerator).
 Warm resets preserve the override. Documented so the "persistent across
 reset" behavior has clear bounds.
 
@@ -336,8 +336,11 @@ numbers fit or they don't.
     `strcmp`.
   - `pp_stroke_rate_init` early-returns on `params == NULL`. Cheap
     defensive contract; never hit in normal flow.
-- **Rate-zero guard.** Manager clamps `rate_hz` to `[1, 1000]` before
-  calling `pp_sample_store_init`. Existing soft guard at
+- **Rate-zero guard.** Manager clamps `rate_hz` to
+  `[PP_SAMPLE_STORE_MIN_RATE_HZ, PP_SAMPLE_STORE_MAX_RATE_HZ]`
+  (defaults 1 Hz and 1000 Hz, declared in
+  `paddling_pulse_sample_store.h`) before calling
+  `pp_sample_store_init`. Existing soft guard at
   `paddling_pulse_stroke_rate.c:82` catches the rest.
 - **Lifecycle pairing.** Every `pp_imu_<x>_start` has a matching `stop`.
   Manager invariant tests assert no source-switch path leaves two
@@ -348,6 +351,89 @@ numbers fit or they don't.
 - **Polar hot-path.** Existing `s_polar.conidx` check in
   `polar_handle_gatt_event` plus the step-1-before-step-2 switch
   ordering guarantee no stale `GATTC_EVENT_IND` lands in a fresh store.
+
+## Code Style (rules.md alignment)
+
+The implementation PRs must satisfy these style rules (derived from
+`config/local/rules.md`, adapted for the embedded-C context —
+C++/RAII items in that document do not apply, this is C).
+
+**Naming and constants:**
+
+- Explicit, descriptive names for every function, variable, enum, struct.
+  No abbreviations that obscure intent (prefer
+  `PP_IMU_OVERRIDE_AUTO` over `PP_IMU_OVR_AUTO`, `candidate_count` over
+  `cand_cnt`).
+- Zero magic numbers in any new code. Every timeout, size, threshold, or
+  range bound is a named `#define` or `enum` with the
+  `PP_<MODULE>_<MEANING>` prefix convention already in use in the
+  codebase.
+- Named constants declared in the header that owns the concept — e.g.
+  sample-rate bounds in `paddling_pulse_sample_store.h`, Polar timeouts
+  in `paddling_pulse_imu_manager.h`.
+
+**Function design:**
+
+- One responsibility per function. Target ≤ 50 lines; if the natural
+  unit is larger, split into helper statics.
+- ≤ 3–4 parameters. Collapse wider parameter lists into a struct
+  (the `pp_stroke_rate_params_t` pattern).
+- Match every `init` / `start` with a `stop` / `reset`. No half-formed
+  lifecycles on the source-switch path.
+
+**Headers:**
+
+- Include guards on every new header (`_PADDLING_PULSE_<NAME>_H_`
+  pattern, matching existing files).
+- Minimal transitive includes. Forward-declare SDK types where possible;
+  push `#include "gapc_task.h"` and similar into the `.c` where they're
+  actually used.
+- Include order: standard → third-party/SDK → project-local.
+
+**Comments:**
+
+- Explain **why**, not **what** or **how**. The code's names should
+  carry the "what"; the comments explain the non-obvious reason a line
+  exists (e.g. "ordering note: stop before clear prevents a stale
+  GATTC_EVENT_IND from landing in the fresh store").
+- No running narration ("now we clear the store, then we call init").
+- No references to transient context ("for the Polar backport",
+  "added in PR #N") — those belong in commit messages.
+
+**Safety (rules.md §4–5 applied to C):**
+
+- Bounds-check every array index that depends on parsed input or
+  message length. Polar PMD parsing already does this at each
+  TLV boundary — preserve that discipline in the new candidate buffer
+  and in `AT+IMU=X` argument parsing.
+- Initialize every stack variable before first use. `__SECTION_ZERO`
+  attribute gives zero-init for retained state; `.bss` gives it for
+  non-retained static state; locals get explicit initialization.
+- No signed/unsigned comparison warnings tolerated. Compile with the
+  existing warning flags and fix any warning the new code introduces.
+- No integer-overflow hazards in RSSI compares or millisecond
+  arithmetic — `int32_t` everywhere with margin.
+
+**Git hygiene (rules.md §1):**
+
+- Branch already follows the feature-branch pattern
+  (`feat/stroke-rate-pipeline-app-layer`). New commits stay on this
+  branch or on a descendant; no direct commits to `main`.
+- No build artifacts, auto-generated files, or IDE config in any
+  commit. `.gitignore` already covers these.
+
+**Modifications (rules.md final note):**
+
+- When editing existing blocks, modify in place. Do not delete-and-
+  reinsert a modified copy. Keeps diffs minimal and review-friendly.
+
+**No AI-author attribution.** Per `MEMORY.md` feedback, no Claude
+co-author line in any commit; no "generated by" references in comments
+or files.
+
+Each of the above is trivially checkable by diff grep during review
+(e.g. `\b[0-9]+\b` in new `.c` files for magic numbers, or a search for
+`Claude` in the commit range).
 
 ## Testing Strategy
 
@@ -477,6 +563,10 @@ blocks. No behavioral change in any single-IMU build.
 - [ ] All four existing build configs (`CFG_IMU_LIS3DH`, `CFG_IMU_POLAR`,
       `CFG_IMU_MPU6050`, each with their respective `CFG_IMU_AXIS_*`) build
       clean via `mingw32-make` with zero linker warnings.
+- [ ] Code-style section satisfied: no magic numbers in new code
+      (timeouts, sizes, thresholds all named constants); no abbreviated
+      identifiers; bounded parsing; include-guard / include-order
+      conventions respected; no Claude attribution anywhere.
 
 ### PR 2 — Dual-IMU runtime manager
 
@@ -525,6 +615,13 @@ Code-level (diff review):
       callbacks remain inert — no manager calls compile in.
 - [ ] No `malloc`, no new `KE_MSG_ALLOC` call sites beyond what existed.
 - [ ] No Claude co-author attribution in any commit.
+- [ ] Code-style section satisfied: every new `.c` file scanned for bare
+      integer literals in expressions (only loop counters, array
+      indices into fixed-size compile-time bounds, and zero-init are
+      acceptable); any other literal is a named constant. Include
+      guards, include-order, one-responsibility-per-function,
+      ≤ 4 parameters, and in-place modification of existing blocks all
+      verified by diff review.
 
 Test coverage (diff review):
 
