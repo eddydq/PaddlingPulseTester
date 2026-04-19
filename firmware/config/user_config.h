@@ -386,10 +386,18 @@ static const struct central_configuration user_central_conf = {
     .superv_to = 0x1F4,
 
      /// Minimum CE length
+#ifdef CFG_IMU_POLAR
     .ce_len_min = 15,
+#else
+    .ce_len_min = 0,
+#endif
 
     /// Maximum CE length
+#ifdef CFG_IMU_POLAR
     .ce_len_max = 15,
+#else
+    .ce_len_max = 0x5,
+#endif
 
     /**************************************************************************************
      * Peer device information (maximum number of peers = 8)

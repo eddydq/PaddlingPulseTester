@@ -727,6 +727,8 @@ void pp_imu_polar_stop(void)
     else if (s_polar.state >= POLAR_WAIT_MTU &&
              s_polar.conidx != GAP_INVALID_CONIDX)
     {
+        s_stop_cancel_pending = true;
+
         /* Disconnect from Polar sensor */
         struct gapc_disconnect_cmd *cmd = KE_MSG_ALLOC(
             GAPC_DISCONNECT_CMD,
@@ -735,7 +737,6 @@ void pp_imu_polar_stop(void)
         cmd->operation = GAPC_DISCONNECT;
         cmd->reason    = CO_ERROR_REMOTE_USER_TERM_CON;
         KE_MSG_SEND(cmd);
-        polar_reset();
     }
     else
     {
@@ -773,6 +774,13 @@ void pp_imu_polar_on_adv_report(struct gapm_adv_report_ind const *param)
 void pp_imu_polar_on_scan_complete(uint8_t status)
 {
     (void)status;
+
+    if (s_stop_cancel_pending)
+    {
+        s_stop_cancel_pending = false;
+        polar_reset();
+        return;
+    }
 
     if (s_polar.state == POLAR_CONNECTING)
     {
@@ -850,7 +858,15 @@ bool pp_imu_polar_on_disconnect(uint16_t conhdl)
                                       s_polar.state == POLAR_IDLE))
         return false;
 
-    polar_retry_if_needed();
+    if (s_stop_cancel_pending)
+    {
+        s_stop_cancel_pending = false;
+        polar_reset();
+    }
+    else
+    {
+        polar_retry_if_needed();
+    }
     return true;
 }
 
@@ -926,9 +942,16 @@ bool pp_imu_polar_handle_message(ke_msg_id_t msgid,
 
         if (evt->operation == GAPM_CANCEL)
         {
+            bool stop_cancel_pending =
+                s_stop_cancel_pending &&
+                (s_polar.state == POLAR_SCANNING ||
+                 s_polar.state == POLAR_CONNECTING);
+            bool retry_cancel_pending =
+                s_retry_cancel_pending &&
+                (s_polar.state == POLAR_CONNECTING);
             pp_polar_cancel_action_t action =
-                pp_polar_cancel_action(s_stop_cancel_pending,
-                                       s_retry_cancel_pending);
+                pp_polar_cancel_action(stop_cancel_pending,
+                                       retry_cancel_pending);
 
             switch (action)
             {
