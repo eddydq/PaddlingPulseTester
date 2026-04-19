@@ -58,3 +58,17 @@ uint16_t pp_imu_manager_logic_clamp_rate(uint16_t rate_hz)
     }
     return rate_hz;
 }
+
+void pp_imu_manager_logic_fill_switch_sequence(
+    pp_imu_lifecycle_step_t out[PP_IMU_LIFECYCLE_STEPS])
+{
+    if (out == NULL)
+    {
+        return;
+    }
+
+    out[0] = PP_IMU_LIFECYCLE_STOP_OLD;
+    out[1] = PP_IMU_LIFECYCLE_SAMPLE_STORE_INIT;
+    out[2] = PP_IMU_LIFECYCLE_STROKE_RATE_INIT;
+    out[3] = PP_IMU_LIFECYCLE_START_NEW;
+}

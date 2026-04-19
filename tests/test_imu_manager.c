@@ -96,6 +96,18 @@ static void test_rate_clamped_to_bounds(void)
     assert(pp_imu_manager_logic_clamp_rate(5000) == 1000);
 }
 
+static void test_switch_sequence_stop_before_store_init(void)
+{
+    pp_imu_lifecycle_step_t sequence[PP_IMU_LIFECYCLE_STEPS];
+
+    pp_imu_manager_logic_fill_switch_sequence(sequence);
+
+    assert(sequence[0] == PP_IMU_LIFECYCLE_STOP_OLD);
+    assert(sequence[1] == PP_IMU_LIFECYCLE_SAMPLE_STORE_INIT);
+    assert(sequence[2] == PP_IMU_LIFECYCLE_STROKE_RATE_INIT);
+    assert(sequence[3] == PP_IMU_LIFECYCLE_START_NEW);
+}
+
 int main(void)
 {
     test_boot_auto_finds_polar();
@@ -107,6 +119,7 @@ int main(void)
     test_switch_not_needed_on_same_source_and_rate();
     test_switch_needed_on_rate_change_same_source();
     test_rate_clamped_to_bounds();
+    test_switch_sequence_stop_before_store_init();
     printf("imu manager logic tests passed\n");
     return 0;
 }
