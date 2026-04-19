@@ -95,7 +95,7 @@
 // #define DB_HEAP_SZ              1024
 // #define ENV_HEAP_SZ             4928
 // #define MSG_HEAP_SZ             6880
-// #define NON_RET_HEAP_SZ         2048
+#define NON_RET_HEAP_SZ         1280
 
 /****************************************************************************************************************/
 /* NVDS configuration                                                                                           */
@@ -195,7 +195,7 @@
 /* Maximum retention memory in bytes. The base address of the retention data is calculated from the selected    */
 /* size.                                                                                                        */
 /****************************************************************************************************************/
-#define CFG_RET_DATA_SIZE    (1868)
+#define CFG_RET_DATA_SIZE    (2256)
 
 /****************************************************************************************************************/
 /* Maximum uninitialized retained data required by the application.                                             */
