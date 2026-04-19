@@ -51,8 +51,10 @@ static void test_claims_only_the_matching_disconnect(void)
 
 static void test_rejects_malformed_acc_settings(void)
 {
+    const uint8_t partial_only[] = { 0x00 };
     const uint8_t truncated[] = { 0x00, 0x02, 0x34 };
     const uint8_t zero_count[] = { 0x00, 0x00 };
+    const uint8_t trailing_byte[] = { 0x00, 0x01, 52, 0x00, 0xFF };
     const uint8_t overflow[] = {
         0x00, 0x01, 52, 0x00,
         0x01, 0x01, 16, 0x00,
@@ -65,8 +67,10 @@ static void test_rejects_malformed_acc_settings(void)
     pp_polar_acc_settings_t out;
 
     memset(&out, 0xA5, sizeof(out));
+    assert(!pp_polar_parse_acc_settings(partial_only, sizeof(partial_only), &out));
     assert(!pp_polar_parse_acc_settings(truncated, sizeof(truncated), &out));
     assert(!pp_polar_parse_acc_settings(zero_count, sizeof(zero_count), &out));
+    assert(!pp_polar_parse_acc_settings(trailing_byte, sizeof(trailing_byte), &out));
     assert(!pp_polar_parse_acc_settings(overflow, sizeof(overflow), &out));
 }
 

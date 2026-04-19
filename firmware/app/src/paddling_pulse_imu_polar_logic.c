@@ -109,7 +109,7 @@ bool pp_polar_parse_acc_settings(const uint8_t *data,
         pos = next_pos;
     }
 
-    return true;
+    return (pos == len);
 }
 
 bool pp_polar_disconnect_is_owned(uint16_t tracked_conhdl,
