@@ -5,12 +5,18 @@ static uint16_t pp_polar_read_u16_le(const uint8_t *data)
     return (uint16_t)data[0] | ((uint16_t)data[1] << 8);
 }
 
-static uint16_t pp_polar_preferred_value(uint8_t type,
-                                         const uint8_t *values,
-                                         uint8_t value_count)
+static bool pp_polar_preferred_value(uint8_t type,
+                                     const uint8_t *values,
+                                     uint8_t value_count,
+                                     uint16_t *selected_value)
 {
     uint16_t preferred;
     uint8_t i;
+
+    if (selected_value == NULL || value_count == 0u)
+    {
+        return false;
+    }
 
     switch (type)
     {
@@ -27,7 +33,8 @@ static uint16_t pp_polar_preferred_value(uint8_t type,
         preferred = 3;
         break;
     default:
-        return pp_polar_read_u16_le(values);
+        *selected_value = pp_polar_read_u16_le(values);
+        return true;
     }
 
     for (i = 0; i < value_count; ++i)
@@ -35,11 +42,13 @@ static uint16_t pp_polar_preferred_value(uint8_t type,
         uint16_t value = pp_polar_read_u16_le(&values[(uint16_t)i * 2]);
         if (value == preferred)
         {
-            return value;
+            *selected_value = value;
+            return true;
         }
     }
 
-    return pp_polar_read_u16_le(values);
+    *selected_value = pp_polar_read_u16_le(values);
+    return true;
 }
 
 bool pp_polar_parse_acc_settings(const uint8_t *data,
@@ -66,12 +75,21 @@ bool pp_polar_parse_acc_settings(const uint8_t *data,
         uint16_t next_pos = (uint16_t)(pos + 2u + value_bytes);
         uint16_t selected;
 
+        if (value_count == 0u)
+        {
+            return false;
+        }
+
         if (next_pos > len)
         {
             return false;
         }
 
-        selected = pp_polar_preferred_value(type, &data[pos + 2], value_count);
+        if (!pp_polar_preferred_value(type, &data[pos + 2], value_count,
+                                      &selected))
+        {
+            return false;
+        }
         if (type == 0x00)
         {
             out->sample_rate_hz = selected;

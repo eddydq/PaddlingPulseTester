@@ -49,17 +49,40 @@ static void test_claims_only_the_matching_disconnect(void)
     assert(!pp_polar_disconnect_is_owned(0x0000, 0x0000, false));
 }
 
+static void test_rejects_malformed_acc_settings(void)
+{
+    const uint8_t truncated[] = { 0x00, 0x02, 0x34 };
+    const uint8_t zero_count[] = { 0x00, 0x00 };
+    const uint8_t overflow[] = {
+        0x00, 0x01, 52, 0x00,
+        0x01, 0x01, 16, 0x00,
+        0x02, 0x01, 8, 0x00,
+        0x04, 0x01, 3, 0x00,
+        0x05, 0x01, 1, 0x00,
+        0x06, 0x01, 2, 0x00,
+        0x07, 0x01, 3, 0x00,
+    };
+    pp_polar_acc_settings_t out;
+
+    memset(&out, 0xA5, sizeof(out));
+    assert(!pp_polar_parse_acc_settings(truncated, sizeof(truncated), &out));
+    assert(!pp_polar_parse_acc_settings(zero_count, sizeof(zero_count), &out));
+    assert(!pp_polar_parse_acc_settings(overflow, sizeof(overflow), &out));
+}
+
 static void test_cancel_actions_distinguish_stop_vs_retry(void)
 {
     assert(pp_polar_cancel_action(false, false) == PP_POLAR_CANCEL_NONE);
     assert(pp_polar_cancel_action(true, false) == PP_POLAR_CANCEL_RESET);
     assert(pp_polar_cancel_action(false, true) == PP_POLAR_CANCEL_RETRY);
+    assert(pp_polar_cancel_action(true, true) == PP_POLAR_CANCEL_RESET);
 }
 
 int main(void)
 {
     test_prefers_52hz_16bit_8g_xyz();
     test_claims_only_the_matching_disconnect();
+    test_rejects_malformed_acc_settings();
     test_cancel_actions_distinguish_stop_vs_retry();
     return 0;
 }
